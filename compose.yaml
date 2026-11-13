@@ -1,0 +1,27 @@
+services:
+  spatialbridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "${SPATIALBRIDGE_BIND_ADDRESS:-0.0.0.0}:${SPATIALBRIDGE_PORT:-8000}:8000"
+    volumes:
+      - "${SPATIALBRIDGE_DATA_DIR:-/srv/spatialbridge/data}:/data"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

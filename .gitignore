@@ -1,0 +1,39 @@
+# Python
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/public/openseadragon/
+frontend/.vite/
+frontend/coverage/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Local runtime data and generated registration artifacts
+workspace-data/
+参考数据/
+参考资料/
+参考项目/
+
+# Local deployment configuration (copy .env.example to .env)
+.env
+.env.*
+!.env.example
+
+# OS, editor and tool files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.alma-snapshots/
+

@@ -1,0 +1,35 @@
+name: 问题报告 / Bug report
+description: 报告错误或异常行为 / Report incorrect or unexpected behaviour
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / Description
+      description: 发生了什么，期望是什么？ / What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 上传 ...
+        2. 点击 ...
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: 输入数据 / Input data
+      description: 使用了哪些文件（显微 PNG 尺寸、是否有 SBD 和热图）？请勿上传未公开的实验数据。 / Which inputs were used? Do not attach unpublished data.
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境 / Environment
+      placeholder: 本地 macOS / Docker on Ubuntu 24.04, Chrome 140, commit abc1234
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图 / Logs or screenshots
+      render: text

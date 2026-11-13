@@ -1,0 +1,40 @@
+[project]
+name = "spatialbridge"
+version = "0.1.0"
+description = "Local automatic registration viewer for microscopy and MALDI heat maps"
+requires-python = ">=3.11"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "opencv-python-headless>=4.10",
+  "numpy>=2.0",
+  "Pillow>=10.4",
+  "tifffile>=2024.8.30",
+  "h5py>=3.11",
+  "python-multipart>=0.0.12",
+  "pytesseract>=0.3.13",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend/spatialbridge"]
+
+[project.optional-dependencies]
+tiles = ["pyvips>=2.2"]
+dev = ["pytest>=8.3", "httpx>=0.27"]
+
+[project.scripts]
+spatialbridge = "spatialbridge.cli:main"
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["tests"]

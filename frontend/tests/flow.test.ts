@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {hasViewport, parseRoute, projectName, projectStatusLabel, selectInitialViewport} from '../src/flow.ts';
+
+test('hash routes preserve project ids and fall back to home', () => {
+  assert.deepEqual(parseRoute('#/'), {kind: 'home'});
+  assert.deepEqual(parseRoute('#/projects/a%2Fb'), {kind: 'project', id: 'a/b'});
+  assert.deepEqual(parseRoute('#/unknown'), {kind: 'home'});
+});
+
+test('project summaries use the source directory and explicit status labels', () => {
+  assert.equal(projectName({id: '123456789', source_dir: '/tmp/sample-data', status: 'ready'}), 'sample-data');
+  assert.equal(projectName({id: '123456789', project_name: '上传项目', source_dir: '/tmp/upload-id', status: 'ready'}), '上传项目');
+  assert.equal(projectName({id: '123456789', status: 'ready'}), '项目 12345678');
+  assert.equal(projectStatusLabel('queued'), '等待处理');
+  assert.equal(projectStatusLabel('running'), '处理中');
+  assert.equal(projectStatusLabel('ready'), '可复核');
+  assert.equal(projectStatusLabel('failed'), '处理失败');
+  assert.equal(projectStatusLabel('assembling'), '文件合并中');
+});
+
+test('session viewport wins over durable saved viewport, with a safe fallback', () => {
+  const saved = {viewport: {x: 1, y: 2, zoom: 3}};
+  const session = {viewport: {x: 4, y: 5, zoom: 6}};
+  assert.deepEqual(selectInitialViewport(session, saved), session.viewport);
+  assert.deepEqual(selectInitialViewport(null, saved), saved.viewport);
+  assert.deepEqual(selectInitialViewport(null, null), {});
+  assert.equal(hasViewport(saved.viewport), true);
+  assert.equal(hasViewport({x: 1, y: 2}), false);
+});

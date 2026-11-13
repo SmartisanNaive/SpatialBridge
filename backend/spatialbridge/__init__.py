@@ -1,0 +1,1 @@
+"""SpatialBridge local application."""
