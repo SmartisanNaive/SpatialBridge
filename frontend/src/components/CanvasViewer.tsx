@@ -22,6 +22,9 @@ import {evaluateCoordinateModel, GRID_INDEX_BUCKET_SIZE, convexHull, projectPoin
 // Attempts after the first before a tile is reported as failed.
 const TILE_RETRIES = 3;
 const TILE_RECOVERY_DELAY_MS = 6000;
+// After this long a layer switch is reported as slow, but it keeps waiting.
+const SLOW_LAYER_MS = 15000;
+const PROGRESS_UPDATE_MS = 250;
 
 export function CanvasViewer({
   projectId,
@@ -131,6 +134,7 @@ export function CanvasViewer({
   const readinessCancelRef = useRef<(() => void) | null>(null);
   const waitForLayerReadyRef = useRef<(target: ViewLayer) => Promise<boolean>>(() => Promise.resolve(false));
   const tileFailureRef = useRef<Record<ViewLayer, boolean>>({pre: false, after: false});
+  const tilesLoadedRef = useRef<Record<ViewLayer, number>>({pre: 0, after: 0});
   const lensTransitionRequestRef = useRef(0);
   const lensTransitionRef = useRef<LensTransition | null>(null);
   const lensTransitionFrameRef = useRef<number | null>(null);
@@ -143,6 +147,7 @@ export function CanvasViewer({
   const [singleDisplayedLayer, setSingleDisplayedLayer] = useState<ViewLayer>(layer);
   const [singleTransition, setSingleTransition] = useState<{from: ViewLayer; to: ViewLayer; id: number} | null>(null);
   const [transitionPending, setTransitionPending] = useState<ViewLayer | null>(null);
+  const [loadProgress, setLoadProgress] = useState<{loaded: number; seconds: number; slow: boolean} | null>(null);
   const [lensVisualRoles, setLensVisualRoles] = useState<LensRoles>(initialLensRoles);
   const [lensTransition, setLensTransition] = useState<LensTransition | null>(null);
   const pre = report.sources.find((source) => source.key === 'pre');
@@ -264,12 +269,18 @@ export function CanvasViewer({
           if (settled) return;
           settled = true;
           if (timer !== undefined) window.clearTimeout(timer);
-          if (readinessCancelRef.current === cancel) readinessCancelRef.current = null;
+          if (readinessCancelRef.current === cancel) {
+            readinessCancelRef.current = null;
+            setLoadProgress(null);
+          }
           resolve(ready);
         };
         const cancel = () => finish(false);
         readinessCancelRef.current = cancel;
         const startedAt = performance.now();
+        const loadedAtStart = tilesLoadedRef.current[target];
+        let lastProgressAt = -Infinity;
+        setLoadProgress({loaded: 0, seconds: 0, slow: false});
         const check = () => {
           const targetViewer = target === 'pre' ? instance : compareInstance;
           const item = targetViewer.world.getItemCount() > 0 ? targetViewer.world.getItemAt(0) : null;
@@ -277,9 +288,21 @@ export function CanvasViewer({
             finish(true);
             return;
           }
-          if (tileFailureRef.current[target] || performance.now() - startedAt > 15000) {
+          // Only a tile whose retries are spent counts as a failure; a slow
+          // layer keeps loading and the notice shows how far it has got.
+          if (tileFailureRef.current[target]) {
             finish(false);
             return;
+          }
+          const now = performance.now();
+          if (now - lastProgressAt >= PROGRESS_UPDATE_MS) {
+            lastProgressAt = now;
+            const elapsed = now - startedAt;
+            setLoadProgress({
+              loaded: tilesLoadedRef.current[target] - loadedAtStart,
+              seconds: Math.floor(elapsed / 1000),
+              slow: elapsed > SLOW_LAYER_MS,
+            });
           }
           timer = window.setTimeout(check, 48);
         };
@@ -818,6 +841,7 @@ export function CanvasViewer({
         }, TILE_RECOVERY_DELAY_MS);
       });
       target.addHandler('tile-loaded', (event: any) => {
+        tilesLoadedRef.current[layer] += 1;
         if (attempts.delete(keyOf(event.tile))) refresh();
       });
     };
@@ -1307,8 +1331,16 @@ export function CanvasViewer({
         )}
       </AnimatePresence>
       <div className={`coverage ${tileError ? 'coverage-error' : ''}${transitionPending ? ' coverage-preparing' : ''}`}>
-        {tileError ? '部分图像瓦片加载失败，请重试或检查后端服务' : transitionPending ? `正在准备${layerLabel(transitionPending)}图像…` : outside ? '当前视野位于该图层覆盖范围外' : gridSampled && showGrid ? '当前缩放下已简化显示点位，放大查看点位' : compare ? '共享视野 · 卷帘对比' : lens ? '共享视野 · 透镜对比' : '前后显微图区域级对齐'}
+        {tileError ? '部分图像瓦片加载失败，请重试或检查后端服务' : transitionPending ? preparingText(layerLabel(transitionPending), loadProgress) : outside ? '当前视野位于该图层覆盖范围外' : gridSampled && showGrid ? '当前缩放下已简化显示点位，放大查看点位' : compare ? '共享视野 · 卷帘对比' : lens ? '共享视野 · 透镜对比' : '前后显微图区域级对齐'}
+        {transitionPending && !tileError && <span className="coverage-progress" aria-hidden="true"><span /></span>}
       </div>
     </div>
   );
+}
+
+function preparingText(label: string, progress: {loaded: number; seconds: number; slow: boolean} | null) {
+  const base = `正在准备${label}图像`;
+  if (!progress || progress.seconds < 1) return `${base}…`;
+  const detail = `已加载 ${progress.loaded} 块 · ${progress.seconds}s`;
+  return progress.slow ? `${base}，加载较慢，仍在加载 · ${detail}` : `${base} · ${detail}`;
 }
