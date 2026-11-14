@@ -13,6 +13,8 @@ import {compressionSupported, gzip, shouldCompress} from '../compress';
 import type {CompressionSample} from '../compress';
 import {extractSbd} from '../sbd';
 import type {SbdExtraction} from '../sbd';
+import {optimizePng} from '../png';
+import type {PngOptimization} from '../png';
 import type {Project, UploadRole, UploadSession} from '../types';
 import {apiUrl, apiFetch, errorText} from '../api';
 
@@ -74,6 +76,8 @@ export function ProjectHome({
   const [extracting, setExtracting] = useState(false);
   const [sbdExtraction, setSbdExtraction] = useState<{source: File; result: SbdExtraction} | null>(null);
   const extractionRef = useRef<{source: File; result: SbdExtraction} | null>(null);
+  const imageCache = useRef(new WeakMap<File, PngOptimization>());
+  const [imageOptimizations, setImageOptimizations] = useState<Map<File, PngOptimization>>(new Map());
   const [paused, setPaused] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadStatus, setUploadStatus] = useState('');
@@ -84,6 +88,12 @@ export function ProjectHome({
   const cancelRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const inputRefs = useRef<Partial<Record<UploadRole, HTMLInputElement | null>>>({});
+
+  useEffect(() => {
+    const active = new Set([...selected.pre, ...selected.after, ...selected.heatmap]);
+    setImageOptimizations((current) => Array.from(current.keys()).every((file) => active.has(file))
+      ? current : new Map(Array.from(current).filter(([file]) => active.has(file))));
+  }, [selected]);
 
   useEffect(() => {
     const storedId = window.localStorage.getItem(uploadSessionStorageKey);
@@ -120,8 +130,14 @@ export function ProjectHome({
   };
 
   const removeFile = (role: UploadRole, index: number) => setSelected((current) => ({...current, [role]: current[role].filter((_, itemIndex) => itemIndex !== index)}));
-  const preparedSelection = sbdExtraction && sbdExtraction.source === selected.sbd[0]
-    ? {...selected, sbd: [sbdExtraction.result.file]} : selected;
+  const prepareFile = (role: UploadRole, file: File) => role === 'sbd'
+    ? (sbdExtraction?.source === file ? sbdExtraction.result.file : file)
+    : (imageOptimizations.get(file)?.file ?? file);
+  const preparedSelection = Object.fromEntries(uploadRoles.map((role) => [role, selected[role].map((file) => prepareFile(role, file))])) as Record<UploadRole, File[]>;
+  const selectedImages = [...selected.pre, ...selected.after, ...selected.heatmap];
+  const checkedImages = selectedImages.filter((file) => imageOptimizations.has(file));
+  const originalImageBytes = checkedImages.reduce((sum, file) => sum + file.size, 0);
+  const optimizedImageBytes = checkedImages.reduce((sum, file) => sum + imageOptimizations.get(file)!.file.size, 0);
   const allSelected = uploadRoles.flatMap((role) => preparedSelection[role].map((file) => ({role, file})));
   const selectedTotal = allSelected.reduce((sum, item) => sum + item.file.size, 0);
   const legacySbdSession = !!session?.files.some((file) => file.role === 'sbd' && file.filename.toLowerCase().endsWith('.sbd'));
@@ -200,6 +216,30 @@ export function ProjectHome({
         setExtracting(false);
         abortRef.current = null;
       }
+      setExtracting(true);
+      abortRef.current = new AbortController();
+      const optimized = new Map<File, PngOptimization>();
+      uploadSelection = {...uploadSelection};
+      for (const role of ['pre', 'after', 'heatmap'] as const) {
+        uploadSelection[role] = [];
+        for (const source of selected[role]) {
+          setUploadStatus(`正在本地检查并无损优化图片：${source.name}`);
+          // Resume older sessions with their original PNG bytes and chunk hashes.
+          const resumeOriginal = session?.files.some((file) => file.role === role && file.filename === source.name && file.size === source.size);
+          const result = resumeOriginal ? {file: source, reason: 'unchanged' as const}
+            : imageCache.current.get(source) ?? await optimizePng(source, {
+              signal: abortRef.current.signal,
+              onProgress: (bytes) => setUploadStatus(`正在本地无损优化 ${source.name}，已处理 ${(bytes / 1024 / 1024).toFixed(0)} MB 图像数据…`),
+            });
+          if (cancelRef.current) return;
+          if (!resumeOriginal) imageCache.current.set(source, result);
+          optimized.set(source, result);
+          uploadSelection[role].push(result.file);
+        }
+      }
+      setImageOptimizations(optimized);
+      setExtracting(false);
+      abortRef.current = null;
       const uploadFiles = uploadRoles.flatMap((role) => uploadSelection[role].map((file) => ({role, file})));
       let currentSession = session && uploadSessionMatches(session, uploadSelection)
         ? await apiFetch<UploadSession>(`/uploads/${encodeURIComponent(session.id)}`)
@@ -242,10 +282,9 @@ export function ProjectHome({
       setFileProgress(Object.fromEntries(currentSession.files.map((file) => [file.id, file.size ? Math.round(file.uploaded_size / file.size * 100) : 0])));
       for (const {remote, local} of matchingFiles) {
         const uploaded = new Set(remote.uploaded_chunks);
-        // Per-file measurements: PNGs stop being compressed after one
-        // attempt, SBD data keeps being compressed while it saves time.
+        // PNG already contains Deflate; avoid redundant gzip and server decompression.
         let compression = null as CompressionSample | null;
-        const canCompress = compressionSupported();
+        const canCompress = !local.name.toLowerCase().endsWith('.png') && compressionSupported();
         for (let index = 0; index < remote.total_chunks; index += 1) {
           await waitIfPaused();
           if (uploaded.has(index)) continue;
@@ -338,14 +377,14 @@ export function ProjectHome({
           <Card className="home-import-card" variant="borderless">
             <div className="home-card-kicker">新建项目</div>
             <Typography.Title level={3}>上传项目文件</Typography.Title>
-            <Typography.Text type="secondary">采集前和采集后 PNG 必填；SBD 和热图可选。SBD 会先在本机提取坐标、数值和板图，仅上传配准所需数据，原始文件保持不变。文件分片上传，网络中断后可以继续。</Typography.Text>
+            <Typography.Text type="secondary">采集前和采集后 PNG 必填；SBD 和热图可选。SBD 会先在本机提取配准所需数据；PNG 自动尝试无损优化，已充分压缩的图片直接上传。像素、尺寸和原始文件保持不变。文件分片上传，网络中断后可以继续。</Typography.Text>
             <Input aria-label="项目名称" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} placeholder="项目名称（可选）" disabled={uploading || busy} />
             <div className="upload-file-pickers">
               {uploadRoles.map((role) => <div className="upload-file-picker" key={role}>
                 <input ref={(element) => {inputRefs.current[role] = element;}} type="file" accept={uploadRoleExtensions[role].join(',')} multiple={role === 'heatmap'} hidden onChange={(event) => {addFiles(role, Array.from(event.target.files ?? [])); event.currentTarget.value = '';}} />
                 <div className="upload-picker-heading"><span>{uploadRoleLabels[role]}</span><Button size="small" icon={<UploadOutlined />} disabled={uploading || busy} onClick={() => inputRefs.current[role]?.click()}>选择</Button></div>
                 {selected[role].length > 0 ? <div className="upload-selected-list">{selected[role].map((file, index) => {
-                  const preparedFile = role === 'sbd' && sbdExtraction?.source === file ? sbdExtraction.result.file : file;
+                  const preparedFile = prepareFile(role, file);
                   const remote = session?.files.find((item) => item.role === role && item.filename === preparedFile.name && item.size === preparedFile.size);
                   const percent = remote ? (fileProgress[remote.id] ?? 0) : undefined;
                   return <div className="upload-selected-file" key={`${file.name}-${file.size}-${index}`}><div className="upload-selected-file-main"><span title={file.name}>{file.name}</span>{percent != null && <Progress percent={percent} size="small" showInfo={false} strokeColor="#2d6a5b" />}</div><Button type="text" size="small" disabled={uploading} onClick={() => removeFile(role, index)}>移除</Button></div>;
@@ -353,6 +392,9 @@ export function ProjectHome({
               </div>)}
             </div>
             {sbdExtraction && sbdExtraction.source === selected.sbd[0] && <Typography.Paragraph type="secondary">SBD 已在本地提取：{(sbdExtraction.result.stats.sourceBytes / 1024 / 1024).toFixed(1)} MB → {(sbdExtraction.result.file.size / 1024 / 1024).toFixed(1)} MB，仅上传精简数据。</Typography.Paragraph>}
+            {checkedImages.length > 0 && <Typography.Paragraph type="secondary">{optimizedImageBytes < originalImageBytes
+              ? `图片已无损优化：${(originalImageBytes / 1024 / 1024).toFixed(1)} MB → ${(optimizedImageBytes / 1024 / 1024).toFixed(1)} MB，像素与尺寸保持不变。`
+              : '图片检查完成，复用原图上传；已压缩或重压无收益的图片不重复处理。'}</Typography.Paragraph>}
             {session && <Alert type="info" showIcon message="发现可恢复的上传会话" description={legacySbdSession ? '这是旧版完整 SBD 上传。请先点击“取消上传”释放该会话的数据，再重新开始，改用本地精简上传。' : uploadSessionMatches(session, preparedSelection) ? '已匹配本地文件，可以继续上传。' : '请重新选择与上次相同的文件；SBD 会在本地重新提取后匹配上传会话。'} />}
             {extracting && <div role="status"><Typography.Paragraph>{uploadStatus}</Typography.Paragraph></div>}
             {!extracting && (uploading || uploadedBytes > 0 || (session && uploadStatus)) && <div className="upload-progress-block"><div className="upload-progress-heading"><span>{uploadStatus || '准备上传…'}</span><span>{totalBytes ? `${Math.round(uploadedBytes / totalBytes * 100)}%` : '—'}</span></div><Progress percent={totalBytes ? Math.min(100, Math.round(uploadedBytes / totalBytes * 100)) : 0} showInfo={false} strokeColor="#2d6a5b" /><Typography.Text type="secondary">{(uploadedBytes / 1024 / 1024).toFixed(1)} / {(Math.max(totalBytes, selectedTotal) / 1024 / 1024).toFixed(1)} MB</Typography.Text></div>}
@@ -360,7 +402,7 @@ export function ProjectHome({
               <Button type="primary" onClick={startUpload} disabled={!canStart} loading={uploading && !paused}>开始上传并处理</Button>
               {uploading && !extracting && session && session.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}>{paused ? '继续上传' : '暂停上传'}</Button>}
               {!uploading && paused && session && <Button icon={<PlayCircleOutlined />} onClick={startUpload}>继续上传</Button>}
-              {(extracting || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}>{extracting ? '取消提取' : '取消上传'}</Button>}
+              {(extracting || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}>{extracting ? '取消本地处理' : '取消上传'}</Button>}
               {demoAvailable && <Button onClick={onDemo} disabled={busy || uploading}>载入内置示例</Button>}
             </Space>
             {(error || uploadError) && <Alert type="error" showIcon message="项目请求失败" description={error || uploadError} />}

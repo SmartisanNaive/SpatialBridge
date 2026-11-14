@@ -32,7 +32,7 @@ SpatialBridge 读取 SCiLS SBD 文件中的逐点坐标和 normalization 值，�
 - **大图浏览**：基于 OpenSeadragon 的瓦片浏览，支持采集前、采集后和前后卷帘对比，十万级 spot 方框流畅绘制。
 - **点位查询与标注**：点击任意 spot 查看 SBD 信息和全部 normalization 值，人工赋值点可导出 CSV。
 - **热图叠加**：自动识别热图旋转和镜像，并按 SBD 点位显示颜色。
-- **大文件上传**：浏览器先从 SBD 提取坐标、数值和板图，仅上传精简包；16 MiB 分片、SHA-256 校验、按需 gzip 压缩、断点续传。
+- **大文件上传**：浏览器先从 SBD 提取坐标、数值和板图，仅上传精简包；PNG 在本机按需无损优化，已充分压缩的图片直接复用；16 MiB 分片、SHA-256 校验、按需 gzip 压缩、断点续传。
 - **单容器部署**：Docker Compose 一键部署到 Linux 服务器，数据持久化在宿主机。
 
 ![工作台前后卷帘对比](docs/images/workbench-swipe.png)
