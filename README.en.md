@@ -117,7 +117,7 @@ The detailed documents are currently in Chinese.
 - Heat map colors are sampled from the rendered image. They approximate the signal and are not raw m/z ion intensities.
 - A slide-texture match alone does not prove that a heat map comes from the same acquisition. Check the sample provenance.
 - The server runs in shared mode, with no accounts, permissions, per-user data isolation or built-in TLS.
-- The Docker image has not yet been accepted on a real Linux server. See the [acceptance checklist](docs/deployment.md#部署验收清单).
+- The container image has passed build, real two-PNG processing and persistence checks across container recreation on macOS Apple Container (Linux/ARM64). Acceptance on a real Linux server is still pending; see the [validation record and acceptance checklist](docs/deployment.md#本地容器验证记录).
 
 ## Acknowledgements
 

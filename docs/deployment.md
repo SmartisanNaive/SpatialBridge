@@ -1,4 +1,4 @@
-# Linux 服务部署
+# 容器部署
 
 [← 返回 README](../README.md)
 
@@ -24,6 +24,46 @@ sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
 sudo docker compose up -d --build
 sudo docker compose ps
 ```
+
+## macOS：使用 Apple Container
+
+安装并启动 Apple 的 `container` 运行时后，可以直接构建同一份 `Dockerfile.api`。以下命令使用独立的持久化卷，并将服务发布到本机 `18000` 端口，便于和本地开发服务并行运行：
+
+```bash
+container build -f Dockerfile.api -t spatialbridge:local --cpus 4 --memory 4G .
+container volume create -s 16G spatialbridge-data
+
+# 新卷先授权给镜像中的运行用户；应用本身仍以 UID/GID 10001 运行。
+container run --rm --user 0:0 --entrypoint /bin/chown \
+  -v spatialbridge-data:/data spatialbridge:local 10001:10001 /data
+
+container run -d --name spatialbridge --cpus 4 --memory 6G \
+  -p 127.0.0.1:18000:8000 -v spatialbridge-data:/data spatialbridge:local
+
+curl -fsS http://127.0.0.1:18000/api/health
+```
+
+打开 `http://127.0.0.1:18000`，前端和 API 均由容器提供，不依赖宿主机的 Vite 或 Python 服务。示例和参考数据不包含在镜像中，首次使用需上传自己的文件。这里为大图处理分配了 6 GiB 内存；小图可按实际需要调整。
+
+查看日志、停止和重新启动：
+
+```bash
+container logs spatialbridge
+container stop --time 60 spatialbridge
+container start spatialbridge
+```
+
+更新镜像后可以删除并重建容器，保留同一数据卷：
+
+```bash
+container stop --time 60 spatialbridge
+container delete spatialbridge
+container build -f Dockerfile.api -t spatialbridge:local --cpus 4 --memory 4G .
+container run -d --name spatialbridge --cpus 4 --memory 6G \
+  -p 127.0.0.1:18000:8000 -v spatialbridge-data:/data spatialbridge:local
+```
+
+`container delete` 不会删除命名卷；不要删除仍需保留项目的 `spatialbridge-data` 卷。这套命令验证的是 OCI 镜像与 Apple Container 运行方式；`compose.yaml` 中的自动重启、健康检查调度及日志轮转仍由 Linux Docker Compose 管理。
 
 ## 配置
 
@@ -86,9 +126,25 @@ sudo docker compose up -d
 
 应用使用 `data://` 表示相对于数据目录的上传文件，使用 `project://` 表示相对于项目目录的图像缓存；两者是报告中的路径标记，不是网络地址。迁移时完整移动数据目录（包含数据库、上传文件和项目缓存），旧版本记录中的内部缓存和上传文件也会按项目或上传 ID 定位。目录导入的来源文件仍在原位置，不包含在数据目录备份中；迁移后如需重新处理，请同时保留来源文件并在新位置重新导入。
 
+## 本地容器验证记录
+
+2026-11-14，在 macOS 的 Apple Container 1.6.1 上构建并运行了 Linux/ARM64 镜像，应用以 UID/GID `10001:10001` 运行。已通过以下检查：
+
+- 前端 TypeScript 检查和生产构建；宿主机后端 42 项、前端 17 项单元测试。
+- 容器提供首页、静态资源、SPA 路由、健康接口和 JSON API；未知 API 返回 404，镜像未包含本机参考数据。
+- 两张真实 `73953 × 8538` 显微 PNG（合计约 482 MB）的中文文件名上传、16 MiB 分片、gzip 传输、SHA-256 错误拒绝和重复分片幂等。
+- 上传首片后停止、删除并重建容器，使用同一命名卷继续完成上传和后台合并。
+- 两图配准、低倍率与原始分辨率瓦片、验证叠加图、浏览器卷帘对比、视野保存、人工标注及 CSV 导出。
+- 处理完成后再次停止、删除并重建容器，确认项目、源图、瓦片、视野、人工标注和导出仍可用。
+- 按应用导入顺序检查 HDF5 文件读写、libvips 图像读取和 Tesseract 可执行程序。
+
+额外的依赖诊断发现：在独立 Python 进程中先导入 `pyvips` 再导入 `h5py`，会因系统 HDF5 1.10.8 与 h5py wheel 的 HDF5 2.0.0 冲突而失败；先导入应用和 `h5py`、再导入 `pyvips` 时，HDF5 与图像读写检查通过。本次没有修改这个导入顺序问题。
+
+本次没有在容器中执行包含真实 SBD 和热图的完整配准流程，也没有验证 GB 级文件上传、合并/处理中的中断恢复、Linux Docker Compose 运维行为及跨主机备份恢复。这些仍保留在下面的服务器验收清单中。
+
 ## 部署验收清单
 
-Docker 镜像尚未在 Linux 服务器上构建验证。以下项目需要用实际服务器、网络入口和真实数据验收：
+镜像已通过上述 macOS 本地验证，仍需在真实 Linux 服务器、网络入口和数据上完成以下验收：
 
 - [ ] 从另一台电脑访问页面，确认 API、瓦片、验证图和 CSV 下载正常。
 - [ ] 上传 GB 级数据，检查中文文件名、暂停续传、刷新后重选恢复、重复提交和摘要错误处理。

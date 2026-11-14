@@ -115,7 +115,7 @@ sudo docker compose up -d --build
 - 热图颜色是渲染图片的近似采样，不是原始 m/z 离子强度。
 - 板图纹理匹配不能单独证明热图与项目来自同一次采集，仍需核对样本来源。
 - 服务端部署为共享模式，没有账号、权限或用户数据隔离，不内置 TLS。
-- Docker 镜像尚未在真实 Linux 服务器上完成验收，见 [部署验收清单](docs/deployment.md#部署验收清单)。
+- 容器镜像已在 macOS Apple Container（Linux/ARM64）通过构建、真实双 PNG 处理和重建持久化验证；真实 Linux 服务器仍待验收，见 [验证记录与部署验收清单](docs/deployment.md#本地容器验证记录)。
 
 ## 致谢
 
