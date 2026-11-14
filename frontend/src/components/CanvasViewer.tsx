@@ -134,6 +134,7 @@ export function CanvasViewer({
   const readinessCancelRef = useRef<(() => void) | null>(null);
   const waitForLayerReadyRef = useRef<(target: ViewLayer) => Promise<boolean>>(() => Promise.resolve(false));
   const tileFailureRef = useRef<Record<ViewLayer, boolean>>({pre: false, after: false});
+  const tileRetryingRef = useRef<Record<ViewLayer, boolean>>({pre: false, after: false});
   const tilesLoadedRef = useRef<Record<ViewLayer, number>>({pre: 0, after: 0});
   const lensTransitionRequestRef = useRef(0);
   const lensTransitionRef = useRef<LensTransition | null>(null);
@@ -258,6 +259,7 @@ export function CanvasViewer({
     compareViewer.current = compareInstance;
     setTileError(false);
     tileFailureRef.current = {pre: false, after: false};
+    tileRetryingRef.current = {pre: false, after: false};
     annotationOverlayReady.current = false;
     annotationOverlays.current.clear();
     const waitForLayerReady = (target: ViewLayer) => {
@@ -284,16 +286,12 @@ export function CanvasViewer({
         const check = () => {
           const targetViewer = target === 'pre' ? instance : compareInstance;
           const item = targetViewer.world.getItemCount() > 0 ? targetViewer.world.getItemAt(0) : null;
-          if (item?.getFullyLoaded()) {
+          if (item?.getFullyLoaded() && !tileRetryingRef.current[target]) {
             finish(true);
             return;
           }
-          // Only a tile whose retries are spent counts as a failure; a slow
-          // layer keeps loading and the notice shows how far it has got.
-          if (tileFailureRef.current[target]) {
-            finish(false);
-            return;
-          }
+          // Failed tile batches are retried by watchTiles. Keep this switch
+          // pending so it completes automatically when the connection recovers.
           const now = performance.now();
           if (now - lastProgressAt >= PROGRESS_UPDATE_MS) {
             lastProgressAt = now;
@@ -807,11 +805,20 @@ export function CanvasViewer({
     compareInstance?.addHandler('viewport-change', syncPrimary);
     // A tile only counts as failed once its retries are used up, and the
     // notice clears again once no such tile is still wanted by the view.
+    const tileRecoveryTimers = new Set<number>();
+    const scheduleTileRecovery = (callback: () => void, delay: number) => {
+      const timer = window.setTimeout(() => {
+        tileRecoveryTimers.delete(timer);
+        callback();
+      }, delay);
+      tileRecoveryTimers.add(timer);
+    };
     const watchTiles = (target: OSDViewer, layer: ViewLayer) => {
       const attempts = new Map<string, number>();
       const refresh = () => {
         let failed = false;
         attempts.forEach((count) => { if (count > TILE_RETRIES) failed = true; });
+        tileRetryingRef.current[layer] = attempts.size > 0;
         tileFailureRef.current[layer] = failed;
         setTileError(tileFailureRef.current.pre || tileFailureRef.current.after);
       };
@@ -822,21 +829,25 @@ export function CanvasViewer({
         const count = (attempts.get(key) ?? 0) + 1;
         attempts.set(key, count);
         refresh();
-        if (count !== TILE_RETRIES + 1 || !tile) return;
+        if (count <= TILE_RETRIES || !tile) return;
         // OpenSeadragon gives up on a tile once its retries are spent. Offer
         // it again later so a connection that recovers fills the gap; a tile
         // the view no longer asks for is simply forgotten.
-        window.setTimeout(() => {
+        scheduleTileRecovery(() => {
           if (!target.isOpen()) return;
+          // Reset the exhausted batch before retrying, including its notice.
+          // A fast new failure must be counted in the new batch as well.
+          attempts.set(key, 0);
+          refresh();
           tile.exists = true;
           target.forceRedraw();
-          window.setTimeout(() => {
-            if (tile.loading) {
-              attempts.set(key, 0);
-              return;
+          scheduleTileRecovery(() => {
+            // A tile no longer requested by this viewport must not block a
+            // switch. Never discard failures from the new retry batch.
+            if (attempts.get(key) === 0 && !tile.loading) {
+              attempts.delete(key);
+              refresh();
             }
-            attempts.delete(key);
-            refresh();
           }, 400);
         }, TILE_RECOVERY_DELAY_MS);
       });
@@ -920,6 +931,8 @@ export function CanvasViewer({
       annotationOverlayReady.current = false;
       annotationSync.current = null;
       if (pitFrame !== undefined) window.cancelAnimationFrame(pitFrame);
+      tileRecoveryTimers.forEach((timer) => window.clearTimeout(timer));
+      tileRecoveryTimers.clear();
       instance.destroy();
       compareInstance.destroy();
       viewer.current = null;
@@ -951,10 +964,7 @@ export function CanvasViewer({
     waitForLayerReadyRef.current(target).then((ready) => {
       if (requestId !== transitionRequestRef.current || !singleModeRef.current) return;
       setTransitionPending(null);
-      if (!ready) {
-        setTileError(true);
-        return;
-      }
+      if (!ready) return;
       const from = singleDisplayedLayerRef.current;
       if (from === target) return;
       const next = {from, to: target, id: requestId};
@@ -1005,10 +1015,7 @@ export function CanvasViewer({
     waitForLayerReadyRef.current(target.outer).then((ready) => {
       if (requestId !== lensTransitionRequestRef.current || !lens || lensTransitionRef.current) return;
       setTransitionPending(null);
-      if (!ready) {
-        setTileError(true);
-        return;
-      }
+      if (!ready) return;
       const next: LensTransition = {from, to: target, phase: 'expand', id: requestId};
       lensTransitionRef.current = next;
       setLensTransition(next);
@@ -1331,8 +1338,8 @@ export function CanvasViewer({
         )}
       </AnimatePresence>
       <div className={`coverage ${tileError ? 'coverage-error' : ''}${transitionPending ? ' coverage-preparing' : ''}`}>
-        {tileError ? '部分图像瓦片加载失败，请重试或检查后端服务' : transitionPending ? preparingText(layerLabel(transitionPending), loadProgress) : outside ? '当前视野位于该图层覆盖范围外' : gridSampled && showGrid ? '当前缩放下已简化显示点位，放大查看点位' : compare ? '共享视野 · 卷帘对比' : lens ? '共享视野 · 透镜对比' : '前后显微图区域级对齐'}
-        {transitionPending && !tileError && <span className="coverage-progress" aria-hidden="true"><span /></span>}
+        {transitionPending ? `${preparingText(layerLabel(transitionPending), loadProgress)}${tileError ? ' · 部分瓦片暂未加载，正在重试' : ''}` : tileError ? '部分图像瓦片暂未加载，正在自动重试…' : outside ? '当前视野位于该图层覆盖范围外' : gridSampled && showGrid ? '当前缩放下已简化显示点位，放大查看点位' : compare ? '共享视野 · 卷帘对比' : lens ? '共享视野 · 透镜对比' : '前后显微图区域级对齐'}
+        {transitionPending && <span className="coverage-progress" aria-hidden="true"><span /></span>}
       </div>
     </div>
   );
