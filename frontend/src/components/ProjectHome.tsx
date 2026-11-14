@@ -11,6 +11,8 @@ import {formatCreatedAt, projectName, projectStatusLabel} from '../flow';
 import {sha256Hex} from '../hash';
 import {compressionSupported, gzip, shouldCompress} from '../compress';
 import type {CompressionSample} from '../compress';
+import {extractSbd} from '../sbd';
+import type {SbdExtraction} from '../sbd';
 import type {Project, UploadRole, UploadSession} from '../types';
 import {apiUrl, apiFetch, errorText} from '../api';
 
@@ -69,6 +71,9 @@ export function ProjectHome({
   const [projectNameInput, setProjectNameInput] = useState('');
   const [session, setSession] = useState<UploadSession | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [sbdExtraction, setSbdExtraction] = useState<{source: File; result: SbdExtraction} | null>(null);
+  const extractionRef = useRef<{source: File; result: SbdExtraction} | null>(null);
   const [paused, setPaused] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadStatus, setUploadStatus] = useState('');
@@ -115,9 +120,12 @@ export function ProjectHome({
   };
 
   const removeFile = (role: UploadRole, index: number) => setSelected((current) => ({...current, [role]: current[role].filter((_, itemIndex) => itemIndex !== index)}));
-  const allSelected = uploadRoles.flatMap((role) => selected[role].map((file) => ({role, file})));
+  const preparedSelection = sbdExtraction && sbdExtraction.source === selected.sbd[0]
+    ? {...selected, sbd: [sbdExtraction.result.file]} : selected;
+  const allSelected = uploadRoles.flatMap((role) => preparedSelection[role].map((file) => ({role, file})));
   const selectedTotal = allSelected.reduce((sum, item) => sum + item.file.size, 0);
-  const canStart = selected.pre.length === 1 && selected.after.length === 1 && !uploading && !busy;
+  const legacySbdSession = !!session?.files.some((file) => file.role === 'sbd' && file.filename.toLowerCase().endsWith('.sbd'));
+  const canStart = selected.pre.length === 1 && selected.after.length === 1 && !uploading && !busy && !legacySbdSession;
 
   const waitIfPaused = async () => {
     while (pauseRef.current && !cancelRef.current) await new Promise<void>((resolve) => window.setTimeout(resolve, 180));
@@ -146,7 +154,13 @@ export function ProjectHome({
     abortRef.current?.abort();
     const current = session;
     if (current?.status === 'pending' || current?.status === 'failed') {
-      try { await apiFetch(`/uploads/${encodeURIComponent(current.id)}`, {method: 'DELETE'}); } catch { /* local cleanup still clears the resumable session */ }
+      try {
+        await apiFetch(`/uploads/${encodeURIComponent(current.id)}`, {method: 'DELETE'});
+      } catch (error) {
+        setUploadError(errorText(error));
+        setUploadStatus('取消未完成，请重试；上传会话仍然保留。');
+        return;
+      }
     }
     window.localStorage.removeItem(uploadSessionStorageKey);
     setSession(null);
@@ -161,18 +175,39 @@ export function ProjectHome({
     if (!canStart) return;
     setUploadError('');
     setUploadStatus('准备上传…');
+    setUploadedBytes(0);
+    setTotalBytes(0);
     cancelRef.current = false;
     pauseRef.current = false;
     setPaused(false);
     setUploading(true);
     try {
-      let currentSession = session && uploadSessionMatches(session, selected)
+      let uploadSelection = selected;
+      if (selected.sbd.length) {
+        const source = selected.sbd[0];
+        setExtracting(true);
+        setUploadStatus('正在本地读取 SBD 索引…');
+        abortRef.current = new AbortController();
+        const cached = extractionRef.current?.source === source ? extractionRef.current.result : null;
+        const result = cached ?? await extractSbd(source, {
+          signal: abortRef.current.signal,
+          onProgress: ({stage}) => setUploadStatus(stage),
+        });
+        if (cancelRef.current) return;
+        extractionRef.current = {source, result};
+        setSbdExtraction({source, result});
+        uploadSelection = {...selected, sbd: [result.file]};
+        setExtracting(false);
+        abortRef.current = null;
+      }
+      const uploadFiles = uploadRoles.flatMap((role) => uploadSelection[role].map((file) => ({role, file})));
+      let currentSession = session && uploadSessionMatches(session, uploadSelection)
         ? await apiFetch<UploadSession>(`/uploads/${encodeURIComponent(session.id)}`)
         : null;
       if (!currentSession) {
         currentSession = await apiFetch<UploadSession>('/uploads', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({project_name: projectNameInput.trim() || selected.pre[0].name, files: allSelected.map(({role, file}) => ({role, filename: file.name, size: file.size}))}),
+          body: JSON.stringify({project_name: projectNameInput.trim() || selected.pre[0].name, files: uploadFiles.map(({role, file}) => ({role, filename: file.name, size: file.size}))}),
         });
         setSession(currentSession);
         setFileProgress(Object.fromEntries(currentSession.files.map((file) => [file.id, file.size ? Math.round(file.uploaded_size / file.size * 100) : 0])));
@@ -195,10 +230,10 @@ export function ProjectHome({
       }
       const used = new Set<number>();
       const matchingFiles = currentSession.files.map((remote) => {
-        const index = allSelected.findIndex((item, itemIndex) => !used.has(itemIndex) && item.role === remote.role && item.file.name === remote.filename && item.file.size === remote.size);
+        const index = uploadFiles.findIndex((item, itemIndex) => !used.has(itemIndex) && item.role === remote.role && item.file.name === remote.filename && item.file.size === remote.size);
         if (index < 0) throw new Error(`请重新选择上传文件：${remote.filename}`);
         used.add(index);
-        return {remote, local: allSelected[index].file};
+        return {remote, local: uploadFiles[index].file};
       });
       const total = currentSession.files.reduce((sum, file) => sum + file.size, 0);
       let completedBytes = currentSession.files.reduce((sum, file) => sum + file.uploaded_size, 0);
@@ -281,6 +316,7 @@ export function ProjectHome({
       }
     } finally {
       abortRef.current = null;
+      setExtracting(false);
       setUploading(false);
     }
   };
@@ -302,26 +338,29 @@ export function ProjectHome({
           <Card className="home-import-card" variant="borderless">
             <div className="home-card-kicker">新建项目</div>
             <Typography.Title level={3}>上传项目文件</Typography.Title>
-            <Typography.Text type="secondary">采集前和采集后 PNG 必填；SBD 和热图可选，两者都提供时会建立 SBD 点位到显微图的坐标映射。文件分片上传，网络中断后可以继续。</Typography.Text>
+            <Typography.Text type="secondary">采集前和采集后 PNG 必填；SBD 和热图可选。SBD 会先在本机提取坐标、数值和板图，仅上传配准所需数据，原始文件保持不变。文件分片上传，网络中断后可以继续。</Typography.Text>
             <Input aria-label="项目名称" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} placeholder="项目名称（可选）" disabled={uploading || busy} />
             <div className="upload-file-pickers">
               {uploadRoles.map((role) => <div className="upload-file-picker" key={role}>
                 <input ref={(element) => {inputRefs.current[role] = element;}} type="file" accept={uploadRoleExtensions[role].join(',')} multiple={role === 'heatmap'} hidden onChange={(event) => {addFiles(role, Array.from(event.target.files ?? [])); event.currentTarget.value = '';}} />
                 <div className="upload-picker-heading"><span>{uploadRoleLabels[role]}</span><Button size="small" icon={<UploadOutlined />} disabled={uploading || busy} onClick={() => inputRefs.current[role]?.click()}>选择</Button></div>
                 {selected[role].length > 0 ? <div className="upload-selected-list">{selected[role].map((file, index) => {
-                  const remote = session?.files.find((item) => item.role === role && item.filename === file.name && item.size === file.size);
+                  const preparedFile = role === 'sbd' && sbdExtraction?.source === file ? sbdExtraction.result.file : file;
+                  const remote = session?.files.find((item) => item.role === role && item.filename === preparedFile.name && item.size === preparedFile.size);
                   const percent = remote ? (fileProgress[remote.id] ?? 0) : undefined;
                   return <div className="upload-selected-file" key={`${file.name}-${file.size}-${index}`}><div className="upload-selected-file-main"><span title={file.name}>{file.name}</span>{percent != null && <Progress percent={percent} size="small" showInfo={false} strokeColor="#2d6a5b" />}</div><Button type="text" size="small" disabled={uploading} onClick={() => removeFile(role, index)}>移除</Button></div>;
                 })}</div> : <span className="upload-empty">尚未选择</span>}
               </div>)}
             </div>
-            {session && <Alert type="info" showIcon message="发现可恢复的上传会话" description={uploadSessionMatches(session, selected) ? '已匹配本地文件，可以继续上传。' : '请重新选择与上次相同的文件，浏览器刷新后仍可继续。'} />}
-            {(uploading || uploadedBytes > 0 || (session && uploadStatus)) && <div className="upload-progress-block"><div className="upload-progress-heading"><span>{uploadStatus || '准备上传…'}</span><span>{totalBytes ? `${Math.round(uploadedBytes / totalBytes * 100)}%` : '—'}</span></div><Progress percent={totalBytes ? Math.min(100, Math.round(uploadedBytes / totalBytes * 100)) : 0} showInfo={false} strokeColor="#2d6a5b" /><Typography.Text type="secondary">{(uploadedBytes / 1024 / 1024).toFixed(1)} / {(Math.max(totalBytes, selectedTotal) / 1024 / 1024).toFixed(1)} MB</Typography.Text></div>}
+            {sbdExtraction && sbdExtraction.source === selected.sbd[0] && <Typography.Paragraph type="secondary">SBD 已在本地提取：{(sbdExtraction.result.stats.sourceBytes / 1024 / 1024).toFixed(1)} MB → {(sbdExtraction.result.file.size / 1024 / 1024).toFixed(1)} MB，仅上传精简数据。</Typography.Paragraph>}
+            {session && <Alert type="info" showIcon message="发现可恢复的上传会话" description={legacySbdSession ? '这是旧版完整 SBD 上传。请先点击“取消上传”释放该会话的数据，再重新开始，改用本地精简上传。' : uploadSessionMatches(session, preparedSelection) ? '已匹配本地文件，可以继续上传。' : '请重新选择与上次相同的文件；SBD 会在本地重新提取后匹配上传会话。'} />}
+            {extracting && <div role="status"><Typography.Paragraph>{uploadStatus}</Typography.Paragraph></div>}
+            {!extracting && (uploading || uploadedBytes > 0 || (session && uploadStatus)) && <div className="upload-progress-block"><div className="upload-progress-heading"><span>{uploadStatus || '准备上传…'}</span><span>{totalBytes ? `${Math.round(uploadedBytes / totalBytes * 100)}%` : '—'}</span></div><Progress percent={totalBytes ? Math.min(100, Math.round(uploadedBytes / totalBytes * 100)) : 0} showInfo={false} strokeColor="#2d6a5b" /><Typography.Text type="secondary">{(uploadedBytes / 1024 / 1024).toFixed(1)} / {(Math.max(totalBytes, selectedTotal) / 1024 / 1024).toFixed(1)} MB</Typography.Text></div>}
             <Space wrap className="home-actions">
               <Button type="primary" onClick={startUpload} disabled={!canStart} loading={uploading && !paused}>开始上传并处理</Button>
-              {uploading && session?.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}>{paused ? '继续上传' : '暂停上传'}</Button>}
+              {uploading && !extracting && session && session.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}>{paused ? '继续上传' : '暂停上传'}</Button>}
               {!uploading && paused && session && <Button icon={<PlayCircleOutlined />} onClick={startUpload}>继续上传</Button>}
-              {session && session.status !== 'assembling' && <Button danger onClick={cancelUpload}>取消上传</Button>}
+              {(extracting || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}>{extracting ? '取消提取' : '取消上传'}</Button>}
               {demoAvailable && <Button onClick={onDemo} disabled={busy || uploading}>载入内置示例</Button>}
             </Space>
             {(error || uploadError) && <Alert type="error" showIcon message="项目请求失败" description={error || uploadError} />}

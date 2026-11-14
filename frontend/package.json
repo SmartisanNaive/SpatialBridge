@@ -10,13 +10,14 @@
     "prebuild": "node scripts/copy-osd-images.mjs",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
-    "test:flow": "node --experimental-strip-types --test tests/flow.test.ts tests/pointer-gesture.test.ts tests/hash.test.ts tests/compress.test.ts",
+    "test:flow": "node --experimental-strip-types --test tests/flow.test.ts tests/pointer-gesture.test.ts tests/hash.test.ts tests/compress.test.ts tests/sbd-package.test.ts",
     "test": "npm run test:flow"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.0",
     "@noble/hashes": "^2.4.0",
     "antd": "^5.22.0",
+    "h5wasm": "0.10.3",
     "motion": "^13.2.0",
     "openseadragon": "^5.0.1",
     "react": "^18.3.1",

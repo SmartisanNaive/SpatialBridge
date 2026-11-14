@@ -32,7 +32,7 @@ SpatialBridge reads per-spot coordinates and normalization values from a SCiLS S
 - **Large-image viewer**: OpenSeadragon tiles with pre, post and swipe comparison views; draws 100k+ spot footprints smoothly.
 - **Spot lookup and annotation**: click any spot to see its SBD record and all normalization values; export manual points as CSV.
 - **Heat map overlay**: detects heat map rotation and mirroring automatically, then colors each SBD spot.
-- **Large uploads**: 16 MiB chunks, SHA-256 verification, adaptive gzip, resumable transfers.
+- **Large uploads**: the browser extracts SBD coordinates, normalization values and optical images before uploading a compact package; 16 MiB chunks, SHA-256 verification, adaptive gzip, resumable transfers.
 - **Single-container deployment**: Docker Compose on a Linux server, with data persisted on the host.
 
 ![Workbench swipe comparison](docs/images/workbench-swipe.png)

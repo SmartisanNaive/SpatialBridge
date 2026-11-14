@@ -31,6 +31,7 @@ from .heatmap import SAMPLING_VERSION, HeatmapRegistrationError, match_heatmap, 
 from .lattice import evaluate_coordinate_model
 from .registration import build_project, make_browser_preview
 from .storage import Store
+from .sbd import materialize_sbd_package, validate_sbd_extract
 from .tiles import blank_tile, build_tile_pyramid, common_tile, pyramid_tile
 
 logger = logging.getLogger(__name__)
@@ -341,7 +342,7 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
     def validate_upload_specs(request: UploadCreateRequest) -> list[dict[str, Any]]:
         allowed_roles = {"pre", "after", "sbd", "board", "heatmap"}
         extension_rules = {
-            "pre": {".png"}, "after": {".png"}, "sbd": {".sbd"},
+            "pre": {".png"}, "after": {".png"}, "sbd": {".sbd", ".sbdx"},
             "board": {".tif", ".tiff"}, "heatmap": {".png"},
         }
         counts: dict[str, int] = {}
@@ -529,11 +530,25 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
             elif item["role"] == "sbd":
                 try:
                     import h5py
-                    with h5py.File(destination, "r"):
-                        pass
+                    if destination.suffix.lower() == ".sbdx":
+                        compact = destination.with_suffix(".sbd")
+                        temporary_compact = compact.with_name(f".{compact.name}.{uuid.uuid4().hex}.tmp")
+                        try:
+                            materialize_sbd_package(destination, temporary_compact)
+                            os.replace(temporary_compact, compact)
+                        finally:
+                            temporary_compact.unlink(missing_ok=True)
+                        destination.unlink()
+                        destination = compact
+                        total = destination.stat().st_size
+                        digest = hashlib.sha256(destination.read_bytes())
+                    with h5py.File(destination, "r") as handle:
+                        validate_sbd_extract(handle)
                 except Exception as error:
+                    if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+                        raise
                     raise HTTPException(400, f"无法读取 SBD 文件 {item['filename']}：{error}") from error
-            manifest.append({"file_id": item["id"], "role": item["role"], "filename": item["filename"],
+            manifest.append({"file_id": item["id"], "role": item["role"], "filename": destination.name,
                              "path": data_reference(destination), "size": total, "sha256": digest.hexdigest()})
         return manifest
 
