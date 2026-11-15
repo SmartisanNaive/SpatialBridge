@@ -8,9 +8,6 @@ import {
   Drawer,
   Dropdown,
   Input,
-  InputNumber,
-  Select,
-  Space,
   Spin,
   Slider,
   Switch,
@@ -50,7 +47,6 @@ import type {
   ViewLayer,
   ViewMode,
   ManualPoint,
-  PendingPoint,
   GridPoint,
   SpotOverlayResponse,
   NearestSpot,
@@ -63,7 +59,6 @@ import {
   spotNumber,
   sanitizeManualPoints,
   manualPointsFromView,
-  newManualPointId,
   methodLabel,
   limitationLabel,
 } from '../utils';
@@ -101,20 +96,12 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const [viewerInitial, setViewerInitial] = useState<Viewport>();
   const [viewLoaded, setViewLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selectedFieldKey, setSelectedFieldKey] = useState('');
   const [gridPoints, setGridPoints] = useState<GridPoint[]>([]);
   const [gridSampled, setGridSampled] = useState(false);
   const [autoPitTotal, setAutoPitTotal] = useState(0);
   const [selectedSpot, setSelectedSpot] = useState<NearestSpot | null>(null);
   const [spotLoading, setSpotLoading] = useState(false);
   const [manualPoints, setManualPoints] = useState<ManualPoint[]>([]);
-  const [annotationMode, setAnnotationMode] = useState(false);
-  const [manualToolsOpen, setManualToolsOpen] = useState(false);
-  const [pendingPoint, setPendingPoint] = useState<PendingPoint | null>(null);
-  const [selectedPointId, setSelectedPointId] = useState<string>();
-  const [draftValue, setDraftValue] = useState<number>();
-  const [draftNote, setDraftNote] = useState('');
-  const [matchingSpot, setMatchingSpot] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 680);
   const [reportOpen, setReportOpen] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
@@ -151,6 +138,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const mapping = report?.spatial_mapping;
   const maldiAvailable = Boolean(mapping?.available && mapping.spot_cache);
   const valueFields = mapping?.value_fields?.length ? mapping.value_fields : (report?.maldi_data?.value_fields ?? []);
+  const selectedFieldKey = valueFields[0]?.key ?? '';
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -176,14 +164,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
     spotRequestRef.current += 1;
   }, []);
 
-  useEffect(() => {
-    const firstField = valueFields[0];
-    if (!firstField) {
-      setSelectedFieldKey('');
-      return;
-    }
-    if (!valueFields.some((field) => field.key === selectedFieldKey)) setSelectedFieldKey(firstField.key);
-  }, [report, selectedFieldKey, valueFields]);
 
   useEffect(() => {
     const available = Boolean(project?.status === 'ready' && maldiAvailable);
@@ -209,7 +189,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
 
   useEffect(() => {
     heatmapUploadToken.current += 1;
-    setManualToolsOpen(false);
     setHeatmapFile(null);
     setHeatmapLabel('');
     setHeatmapUploading(false);
@@ -296,12 +275,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         savedViewportRef.current = durableViewport;
         savedSettingsRef.current = saved.settings ?? {};
         setManualPoints(durableManualPoints);
-        setAnnotationMode(false);
-        setPendingPoint(null);
-        setSelectedPointId(undefined);
-        setDraftValue(undefined);
-        setDraftNote('');
-        setMatchingSpot(false);
         viewportRef.current = next;
         setViewport(next);
         setViewerInitial({...next, layer: nextLayer});
@@ -325,12 +298,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         savedViewportRef.current = null;
         savedSettingsRef.current = {};
         setManualPoints([]);
-        setAnnotationMode(false);
-        setPendingPoint(null);
-        setSelectedPointId(undefined);
-        setDraftValue(undefined);
-        setDraftNote('');
-        setMatchingSpot(false);
         // If the service is temporarily unavailable, keep the tab-local
         // session usable instead of replacing it with a blank full view.
         const next = selectInitialViewport(session, null) as Viewport;
@@ -430,12 +397,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
     viewportRef.current = {...saved, layer: nextLayer};
     setLayer(nextLayer);
     setManualPoints(sanitizeManualPoints(saved.manualPoints));
-    setAnnotationMode(false);
-    setPendingPoint(null);
-    setSelectedPointId(undefined);
-    setDraftValue(undefined);
-    setDraftNote('');
-    setMatchingSpot(false);
     if (settings.mode === 'single' || settings.mode === 'compare' || settings.mode === 'lens') setMode(settings.mode);
     if (typeof settings.swapLayers === 'boolean') setSwapLayers(settings.swapLayers);
     if (typeof settings.comparePosition === 'number') setComparePosition(settings.comparePosition);
@@ -456,115 +417,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const activeSource = currentLayer === 'after' ? afterSource : preSource;
   const activeRegistration = report.registrations.find((item) => item.source_key === currentLayer) ?? report.registrations[0];
   if (!activeRegistration) return <>{holder}<div className="canvas-empty">该项目缺少可用的配准结果。</div></>;
-  const selectedPoint = manualPoints.find((point) => point.id === selectedPointId);
-  const displayedPoints: ManualPoint[] = pendingPoint
-    ? [...manualPoints, {id: 'pending', x: pendingPoint.x, y: pendingPoint.y, value: pendingPoint.value,
-      sbd_spot_id: pendingPoint.sbd_spot_id, raster: pendingPoint.raster, field_key: pendingPoint.field_key,
-      match_distance_px: pendingPoint.match_distance_px, pit_score: pendingPoint.pit_score,
-      auto_detected: pendingPoint.auto_detected}]
-    : manualPoints;
-  const resetPointEditor = () => {
-    spotRequestRef.current += 1;
-    setPendingPoint(null);
-    setSelectedPointId(undefined);
-    setDraftValue(undefined);
-    setDraftNote('');
-    setMatchingSpot(false);
-  };
-  const toggleAnnotationMode = () => {
-    if (layer !== 'after') {
-      messageApi.info('请先切换到“采集后”图层');
-      return;
-    }
-    setPendingPoint(null);
-    setSelectedPointId(undefined);
-    setDraftValue(undefined);
-    setDraftNote('');
-    setAnnotationMode((current) => !current);
-  };
-  const handleAnnotationPlace = async (point: {x: number; y: number}) => {
-    const requestId = spotRequestRef.current + 1;
-    spotRequestRef.current = requestId;
-    setPendingPoint(point);
-    setSelectedPointId(undefined);
-    setDraftValue(undefined);
-    setDraftNote('');
-    setAnnotationMode(false);
-    if (!maldiAvailable) {
-      setMatchingSpot(false);
-      messageApi.info('附近没有可自动匹配的 SBD 点，请手动录入数值');
-      return;
-    }
-    setMatchingSpot(true);
-    try {
-      const fieldQuery = selectedFieldKey ? `&field=${encodeURIComponent(selectedFieldKey)}` : '';
-      const match = await apiFetch<NearestSpot>(
-        `/projects/${project.id}/spots/nearest?x=${encodeURIComponent(point.x)}&y=${encodeURIComponent(point.y)}&layer=after&detected_only=true&max_distance=100${fieldQuery}`,
-      );
-      if (requestId !== spotRequestRef.current) return;
-      if (match.found) {
-        setPendingPoint({x: match.x, y: match.y, sbd_spot_id: match.spot_id, raster: match.raster,
-          field_key: match.field_key ?? undefined, field_label: match.field_label ?? undefined,
-          match_distance_px: match.distance_px, pit_score: match.pit_score ?? undefined,
-          auto_detected: true, value: match.value ?? undefined});
-        setDraftValue(match.value ?? undefined);
-        setDraftNote(`自动匹配 SBD spot #${match.spot_id} · 图像校正距离 ${(match.distance_px ?? 0).toFixed(1)} px`);
-        messageApi.success(`已自动匹配 SBD spot #${match.spot_id}，值已填入`);
-      } else {
-        messageApi.info('附近没有自动确认的 SBD 灼烧坑，请手动录入数值');
-      }
-    } catch (error) {
-      if (requestId === spotRequestRef.current) messageApi.warning(`自动取值失败，请手动录入：${errorText(error)}`);
-    } finally {
-      if (requestId === spotRequestRef.current) setMatchingSpot(false);
-    }
-  };
-  const handleAnnotationSelect = (id: string) => {
-    const point = manualPoints.find((item) => item.id === id);
-    if (!point) return;
-    setManualToolsOpen(true);
-    spotRequestRef.current += 1;
-    setPendingPoint(null);
-    setAnnotationMode(false);
-    setSelectedPointId(id);
-    setDraftValue(point.value);
-    setDraftNote(point.note ?? '');
-    setMatchingSpot(false);
-  };
-  const commitPoint = () => {
-    if (!pendingPoint && !selectedPoint) return;
-    if (draftValue === undefined || !Number.isFinite(draftValue)) {
-      messageApi.warning('请先录入数值');
-      return;
-    }
-    const note = draftNote.trim() || undefined;
-    if (pendingPoint) {
-      const id = newManualPointId();
-      setManualPoints((current) => [...current, {id, x: pendingPoint.x, y: pendingPoint.y, value: draftValue, note,
-        sbd_spot_id: pendingPoint.sbd_spot_id, raster: pendingPoint.raster, field_key: pendingPoint.field_key,
-        match_distance_px: pendingPoint.match_distance_px, pit_score: pendingPoint.pit_score,
-        auto_detected: pendingPoint.auto_detected}]);
-      setPendingPoint(null);
-      setSelectedPointId(id);
-      setDraftValue(draftValue);
-      setDraftNote(note ?? '');
-      messageApi.success('灼烧坑赋值已添加');
-      return;
-    }
-    setManualPoints((current) => current.map((point) => point.id === selectedPointId
-      ? {...point, value: draftValue, note}
-      : point));
-    messageApi.success('灼烧坑赋值已更新');
-  };
-  const deletePoint = () => {
-    if (!selectedPointId) return;
-    setManualPoints((current) => current.filter((point) => point.id !== selectedPointId));
-    resetPointEditor();
-    messageApi.success('灼烧坑赋值已删除');
-  };
-  const exportManualPoints = () => {
-    window.open(apiUrl(`/projects/${project.id}/manual-points.csv`), '_blank', 'noopener,noreferrer');
-  };
   const pitDetection = mapping?.metrics?.pit_detection;
   const chainP95 = mapping?.coordinate_validation?.world_chain_pre_vs_after_px?.p95_px;
   const opticalP95 = mapping?.metrics?.lattice_matching?.optical_validation?.candidates?.find(
@@ -579,12 +431,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
     spotRequestRef.current += 1;
     if (mode !== 'single') setMode('single');
     setLayer(choice);
-    setAnnotationMode(false);
-    setPendingPoint(null);
-    setSelectedPointId(undefined);
-    setDraftValue(undefined);
-    setDraftNote('');
-    setMatchingSpot(false);
     setSpotLoading(false);
     setSelectedSpot(null);
   };
@@ -593,12 +439,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
     const nextLayer = nextMode === 'single' ? currentLayer : primaryLayerForMode(nextMode, swapLayers);
     setMode(nextMode);
     setLayer(nextLayer);
-    setAnnotationMode(false);
-    setPendingPoint(null);
-    setSelectedPointId(undefined);
-    setDraftValue(undefined);
-    setDraftNote('');
-    setMatchingSpot(false);
     setSpotLoading(false);
     setSelectedSpot(null);
   };
@@ -884,63 +724,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               }]} />
             </section>
 
-            <Collapse className="sidebar-collapse" ghost activeKey={manualToolsOpen ? ['annotations'] : []} onChange={(keys) => {
-              const open = keys.includes('annotations');
-              setManualToolsOpen(open);
-              if (!open) {
-                setAnnotationMode(false);
-                resetPointEditor();
-              }
-            }} items={[{
-              key: 'annotations',
-              label: `补充标注${manualPoints.length ? ` · ${manualPoints.length} 个` : '（可选）'}`,
-              children: <div className="annotation-section">
-              <Typography.Text type="secondary" className="annotation-help">在采集后图层点击灼烧坑，可自动匹配 SBD 点并录入人工值；人工记录单独保存，不改写原始数据。</Typography.Text>
-              <Space wrap>
-                <Button size="small" type={annotationMode ? 'primary' : 'default'} onClick={toggleAnnotationMode} disabled={currentLayer !== 'after' || mode !== 'single'}>
-                  {annotationMode ? '点击灼烧坑' : '新增赋值点'}
-                </Button>
-                <Button size="small" onClick={exportManualPoints} disabled={!manualPoints.length}>导出人工赋值 CSV</Button>
-              </Space>
-              {currentLayer !== 'after' && <Typography.Text type="secondary" className="annotation-hint">请切换到采集后图层添加赋值点。</Typography.Text>}
-              {mode !== 'single' && currentLayer === 'after' && <Typography.Text type="secondary" className="annotation-hint">请先切换到单图模式再添加赋值点。</Typography.Text>}
-              {(pendingPoint || selectedPoint) && (
-                <div className="annotation-editor">
-                  <Typography.Text strong>{pendingPoint ? '新建赋值点' : '编辑赋值点'}</Typography.Text>
-                  <Typography.Text type="secondary">公共坐标：({Math.round((pendingPoint ?? selectedPoint!).x)}, {Math.round((pendingPoint ?? selectedPoint!).y)})</Typography.Text>
-                  {matchingSpot && <Typography.Text type="secondary"><Spin size="small" /> 正在从 SBD 匹配坐标和值…</Typography.Text>}
-                  {pendingPoint?.sbd_spot_id !== undefined && <Tag color="cyan">自动匹配 SBD spot #{pendingPoint.sbd_spot_id} · raster {pendingPoint.raster}</Tag>}
-                  <InputNumber
-                    aria-label="人工值"
-                    className="annotation-value"
-                    value={draftValue}
-                    onChange={(value) => setDraftValue(value === null ? undefined : value)}
-                    placeholder="输入数值"
-                    controls={false}
-                    disabled={matchingSpot}
-                  />
-                  <Input aria-label="赋值备注" value={draftNote} onChange={(event) => setDraftNote(event.target.value)} placeholder="备注（可选）" disabled={matchingSpot} />
-                  <Space>
-                    <Button type="primary" size="small" onClick={commitPoint} disabled={matchingSpot}>{pendingPoint ? '添加' : '更新'}</Button>
-                    {!pendingPoint && <Button danger size="small" onClick={deletePoint}>删除</Button>}
-                    <Button size="small" onClick={resetPointEditor}>取消</Button>
-                  </Space>
-                </div>
-              )}
-              {manualPoints.length > 0 && (
-                <div className="annotation-list">
-                  {manualPoints.map((point, index) => (
-                    <button key={point.id} type="button" className={'annotation-row ' + (point.id === selectedPointId ? 'selected' : '')} onClick={() => handleAnnotationSelect(point.id)}>
-                      <span>#{index + 1}</span>
-                      <strong>{point.value === undefined ? '未赋值' : point.value}{point.auto_detected ? ' · SBD' : ''}</strong>
-                      <span>({Math.round(point.x)}, {Math.round(point.y)})</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              </div>,
-            }]} />
-
             <Collapse className="sidebar-collapse" ghost items={[{
               key: 'details',
               label: <span><SlidersOutlined /> 数据详情</span>,
@@ -954,7 +737,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                   {heatmap.inliers != null && <div><span>热图有效匹配点</span><strong>{heatmap.inliers}</strong></div>}
                   {heatmap.error_p95_px != null && <div><span>板图配准误差 p95</span><strong>{spotNumber(heatmap.error_p95_px, 2)} px</strong></div>}
                 </>}
-                {valueFields.length > 0 && <label className="sidebar-field"><span>点位 / 导出字段</span><Select size="small" value={selectedFieldKey || valueFields[0].key} onChange={setSelectedFieldKey} options={valueFields.map((field) => ({value: field.key, label: field.label}))} /></label>}
               </div>,
             }]} />
             <div className="sidebar-footer">
@@ -978,11 +760,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                 onImageScale={setPixelsPerImagePixel}
                 initialViewport={viewerInitial}
                 restoreViewport={savedViewportRef.current}
-                manualPoints={displayedPoints}
-                annotationMode={annotationMode}
-                onAnnotationPlace={handleAnnotationPlace}
-                onAnnotationSelect={handleAnnotationSelect}
-                selectedAnnotationId={selectedPointId}
+                manualPoints={manualPoints}
                 onSpotSelect={handleSpotSelect}
                 gridPoints={gridPoints}
                 gridSampled={gridSampled}
