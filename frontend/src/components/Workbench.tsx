@@ -660,7 +660,8 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
             <section className="control-section project-summary">
               <div className="section-heading"><span>项目摘要</span><span className="section-meta">只读</span></div>
               <div className="summary-row"><span>来源</span><strong title={projectLabel}>{projectLabel}</strong></div>
-              <div className="summary-row"><span>映射状态</span><strong className={mappingSuccess ? 'summary-success' : 'summary-muted'}>{mappingSuccess ? '已完成，可复核' : mapping?.available ? '需复核' : '无 MALDI 数据'}</strong></div>
+              <div className="summary-row"><span>映射状态</span><strong className={mappingSuccess ? 'summary-success' : 'summary-muted'}>{mappingSuccess ? '已完成，可复核' : mapping?.available ? '需复核' : report?.maldi_data?.available ? 'SBD 已读取，尚未定位' : '无 MALDI 数据'}</strong></div>
+              <div className="summary-row"><span>SBD 采样点</span><strong>{report?.maldi_data?.spot_count?.toLocaleString() ?? '—'}</strong></div>
               <div className="summary-row"><span>已映射点</span><strong>{mapping?.mapped_spot_count?.toLocaleString() ?? '—'}</strong></div>
             </section>
             <AnimatePresence initial={false} mode="wait">
@@ -692,7 +693,9 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               <div className="switch-row"><span><EyeOutlined /> 采样网格</span><Switch size="small" checked={showGrid} onChange={setShowGrid} /></div>
               <div className="switch-row"><span><AimOutlined /> 灼烧坑标记 <em>{autoPitTotal.toLocaleString()}</em></span><Switch size="small" checked={showPits} onChange={setShowPits} disabled={!maldiAvailable} /></div>
               <div className="parameter-block opacity-block"><div className="parameter-label"><span>叠加透明度</span><span className="parameter-value">{overlayOpacity}%</span></div><Slider min={0} max={100} value={overlayOpacity} onChange={setOverlayOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
-              {!maldiAvailable && <div className="sidebar-empty-note">当前没有可用的 MALDI/SBD 坐标缓存，灼烧坑标记和 CSV 导出不可用。</div>}
+              {!maldiAvailable && <div className="sidebar-empty-note">{report?.maldi_data?.available
+                ? `SBD 已读取，但尚未建立显微图坐标对应关系，暂时无法显示光斑标记与导出 CSV。${mapping?.reason ?? ''}`
+                : '当前未读取 MALDI/SBD 数据，无法显示光斑标记与导出 CSV。'}</div>}
             </section>
 
             <section className="control-section">

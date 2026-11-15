@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+from itertools import combinations
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,8 +11,10 @@ from PIL import Image
 
 from .lattice import evaluate_coordinate_model, fit_optical_lattice
 from .registration import (
+    Registration,
     RegistrationError,
     _attribute_text,
+    detect_markers,
     dimensions,
     downscaled,
     extract_heat_text,
@@ -1196,15 +1199,50 @@ def _unavailable(reason: str) -> dict[str, Any]:
             "detected_pit_count": 0, "candidate_count": 0}
 
 
+def _board_to_microscopy(board: Path, after: Path, world_to_board: np.ndarray,
+                         world: np.ndarray, raster: np.ndarray,
+                         spot_sizes: np.ndarray) -> Registration:
+    """Use SBD's optical reference, without requiring an ion heat map.
+
+    A board can contain several acquisition regions and more than two markers.
+    Only accept a pair that places the primary SBD region inside the microscopy
+    image with corner residuals below two acquisition pitches. Full lattice
+    identity and geometry validation still follows this initial alignment.
+    """
+    image, _ = load_gray(board)
+    markers = detect_markers(image)
+    primary = int(np.bincount(raster.astype(np.int64)).argmax())
+    points = transform_points(world_to_board, world[raster == primary])
+    width, height = dimensions(after)
+    candidates = []
+    for pair in combinations(markers, 2):
+        try:
+            registration = marker_registration(
+                board, after, "board_to_after", source_marker_pair=list(pair), allow_reflection=True,
+            )
+            matrix = np.asarray(registration.matrix, dtype=float)
+            mapped = transform_points(matrix, points)
+            inside = (np.isfinite(mapped).all(axis=1) & (mapped[:, 0] >= 0) &
+                      (mapped[:, 0] < width) & (mapped[:, 1] >= 0) & (mapped[:, 1] < height))
+            _, _, pitch = _spot_geometry(spot_sizes, matrix @ world_to_board)
+            residual = registration.metric["corner_p95_px"]
+            if inside.mean() >= .97 and np.isfinite(pitch) and pitch > 0 and residual <= 2 * pitch:
+                registration.metric["primary_coverage"] = float(inside.mean())
+                candidates.append((residual / pitch, registration))
+        except (RegistrationError, ValueError, np.linalg.LinAlgError):
+            continue
+    if not candidates:
+        raise RegistrationError("SBD 板图标记无法与采集后显微图建立可靠对应关系")
+    return min(candidates, key=lambda candidate: candidate[0])[1]
+
+
 def build_spatial_mapping(project_dir: Path, pre: Path, after: Path, maldi_path: Path | None,
                           board_candidates: list[Path], heatmaps: list[Path],
                           after_to_pre: list[list[float]],
                           progress: Callable[[str], None] | None = None) -> tuple[dict[str, Any], list[str] | None]:
-    """Build and persist the SBD → board → heat-map → microscopy integration."""
+    """Build SBD → optical board → microscopy, optionally via a heat map."""
     if maldi_path is None:
         return _unavailable("未找到 MALDI-数据/*.sbd"), None
-    if not heatmaps:
-        return _unavailable("没有可用的 PNG 热图"), None
     embedded_matrix: np.ndarray | None = None
     if not board_candidates:
         try:
@@ -1238,8 +1276,17 @@ def build_spatial_mapping(project_dir: Path, pre: Path, after: Path, maldi_path:
     original = sbd["original"]
     world = sbd["world"]
     raster = sbd["raster"]
+    direct_board = embedded_matrix is not None or not heatmaps
     best: dict[str, Any] | None = None
     attempts: list[dict[str, Any]] = []
+    # Embedded optical images already carry World2Px. They provide the
+    # geometric reference for three-file imports; ion heat maps are optional.
+    if direct_board:
+        heatmaps = []
+        board_after = _board_to_microscopy(board, after, world_to_board, world, raster, sbd["spot_sizes"])
+        best = {"path": str(board.resolve()), "filename": board.name,
+                "board_to_heat": {"matrix": np.eye(3).tolist(), "method": "SBD optical reference"},
+                "consistency": _affine_consistency(original, transform_points(world_to_board, world), raster)}
     for heatmap in heatmaps:
         try:
             if progress:
@@ -1263,8 +1310,14 @@ def build_spatial_mapping(project_dir: Path, pre: Path, after: Path, maldi_path:
     board_heat = best["board_to_heat"]
     world_to_heat = np.asarray(board_heat["matrix"], dtype=float) @ world_to_board
     if progress:
-        progress("计算热图到采集前/采集后显微图变换")
-    heat_to_pre = marker_registration(heatmap, pre, "heatmap_to_pre")
+        progress("计算 SBD 板图到显微图变换" if direct_board else "计算热图到采集前/采集后显微图变换")
+    if direct_board:
+        board_to_pre = np.asarray(after_to_pre, dtype=float) @ np.asarray(board_after.matrix, dtype=float)
+        board_to_pre /= board_to_pre[2, 2]
+        heat_to_pre = Registration("board_to_pre", board_to_pre.tolist(), "passed",
+                                   "SBD board markers via after", board_after.metric, board_after.coverage)
+    else:
+        heat_to_pre = marker_registration(heatmap, pre, "heatmap_to_pre")
     # Keep an independent heatmap→after fit as a diagnostic, but do not use
     # it as a second competing coordinate chain.  The viewer's public frame
     # is pre-image pixels and the after layer is rendered through the single
@@ -1276,7 +1329,8 @@ def build_spatial_mapping(project_dir: Path, pre: Path, after: Path, maldi_path:
     #
     # This avoids the large drift that appears when two noisy projective fits
     # are composed independently over a 74k-pixel-wide scan.
-    heat_to_after_independent = marker_registration(heatmap, after, "heatmap_to_after")
+    heat_to_after_independent = (board_after if direct_board else
+                                 marker_registration(heatmap, after, "heatmap_to_after"))
     after_to_pre_matrix = np.asarray(after_to_pre, dtype=float)
     after_to_pre_inverse = np.linalg.inv(after_to_pre_matrix)
     base_heat_to_after = after_to_pre_inverse @ np.asarray(heat_to_pre.matrix, dtype=float)
@@ -1509,7 +1563,9 @@ def build_spatial_mapping(project_dir: Path, pre: Path, after: Path, maldi_path:
         "raster_pixel_to_world": sbd.get("raster_pixel_to_world", {}),
         "board": {"path": str(board.resolve()), "filename": board.name, "width": board_dimensions[0], "height": board_dimensions[1],
                   "origin": "sbd_embedded" if embedded_matrix is not None else "provided"},
-        "heatmap": {"path": str(heatmap.resolve()), "filename": heatmap.name, "mz": extract_heat_text(heatmap)},
+        "heatmap": ({} if direct_board else
+                    {"path": str(heatmap.resolve()), "filename": heatmap.name, "mz": extract_heat_text(heatmap)}),
+        "alignment_reference": "sbd_board" if direct_board else "heatmap",
         "optical_reference": {"name": sbd.get("optical_name"), "reference_path": sbd.get("reference_path"),
                               "matrix_source": sbd.get("world_to_board_source"),
                               "reference_width": sbd.get("reference_width"), "reference_height": sbd.get("reference_height"),

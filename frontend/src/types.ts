@@ -59,6 +59,8 @@ export type MaldiData = {
 export type SpatialMapping = {
   available: boolean;
   status: string;
+  reason?: string;
+  alignment_reference?: 'sbd_board' | 'heatmap';
   quality?: string;
   primary_raster?: number;
   coordinate_convention?: {point_order?: string; image_array_order?: string; homogeneous?: string; pixel_origin?: string};

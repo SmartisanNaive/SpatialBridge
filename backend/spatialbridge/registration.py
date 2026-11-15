@@ -335,10 +335,14 @@ def scaled_matrix(matrix: np.ndarray, source_scale: float, target_scale: float) 
     return np.diag([1 / target_scale, 1 / target_scale, 1]) @ matrix @ np.diag([source_scale, source_scale, 1])
 
 
-def marker_registration(source: Path, target: Path, label: str) -> Registration:
+def marker_registration(source: Path, target: Path, label: str, *,
+                        source_marker_pair: list[dict[str, Any]] | None = None,
+                        allow_reflection: bool = False) -> Registration:
     source_image, source_scale = load_gray(source)
     target_image, target_scale = load_gray(target)
-    source_markers = select_two_markers(detect_markers(source_image), source.name)
+    source_markers = (sorted(source_marker_pair, key=lambda marker: marker["centre"][0])
+                      if source_marker_pair is not None
+                      else select_two_markers(detect_markers(source_image), source.name))
     target_markers = select_two_markers(detect_markers(target_image), target.name)
     source_corners = [order_quad(np.asarray(marker["corners"], dtype=float)) for marker in source_markers]
 
@@ -391,7 +395,8 @@ def marker_registration(source: Path, target: Path, label: str) -> Registration:
                         x_step = transform_points(candidate_matrix, (centre + [1.0, 0.0])[None, :])[0] - anchor
                         y_step = transform_points(candidate_matrix, (centre + [0.0, 1.0])[None, :])[0] - anchor
                         orientation_determinants.append(float(x_step[0] * y_step[1] - x_step[1] * y_step[0]))
-                    if not all(value > 0 for value in orientation_determinants):
+                    if not (all(value > 0 for value in orientation_determinants) or
+                            (allow_reflection and all(value < 0 for value in orientation_determinants))):
                         continue
                     fit_candidates.append((float(np.median(errors)), float(np.quantile(errors, .95)),
                                            float(np.mean(centre_error)), pairing_index,
@@ -403,7 +408,7 @@ def marker_registration(source: Path, target: Path, label: str) -> Registration:
     # fallback for an explicitly mirrored scan, rather than a result that can
     # win just because a reflected square permutation fits a few pixels better.
     direct_candidates = [item for item in fit_candidates if item[3] == 0]
-    eligible = direct_candidates or fit_candidates
+    eligible = fit_candidates if allow_reflection else (direct_candidates or fit_candidates)
     _, _, _, _, matrix_small, residual, centre_errors, selected_pairing = min(
         eligible, key=lambda item: (item[0], item[1], item[2]),
     )
@@ -541,7 +546,7 @@ def build_project(source_dir: Path, project_dir: Path, progress: Callable[[str],
     maldi_data = inspect_maldi_data(maldi_path if isinstance(maldi_path, Path) else None)
     update("生成验证叠加图")
     artifacts = write_validation_artifacts(project_dir, pre, after, after_to_pre.matrix)
-    update("建立 SBD → 板图 → 热图 → 显微图坐标链")
+    update("建立 SBD 与显微图坐标对应关系")
     from .integration import build_spatial_mapping
 
     try:
