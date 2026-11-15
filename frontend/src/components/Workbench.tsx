@@ -109,6 +109,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const [spotLoading, setSpotLoading] = useState(false);
   const [manualPoints, setManualPoints] = useState<ManualPoint[]>([]);
   const [annotationMode, setAnnotationMode] = useState(false);
+  const [manualToolsOpen, setManualToolsOpen] = useState(false);
   const [pendingPoint, setPendingPoint] = useState<PendingPoint | null>(null);
   const [selectedPointId, setSelectedPointId] = useState<string>();
   const [draftValue, setDraftValue] = useState<number>();
@@ -207,6 +208,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
 
   useEffect(() => {
     heatmapUploadToken.current += 1;
+    setManualToolsOpen(false);
     setHeatmapFile(null);
     setHeatmapLabel('');
     setHeatmapUploading(false);
@@ -516,6 +518,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const handleAnnotationSelect = (id: string) => {
     const point = manualPoints.find((item) => item.id === id);
     if (!point) return;
+    setManualToolsOpen(true);
     spotRequestRef.current += 1;
     setPendingPoint(null);
     setAnnotationMode(false);
@@ -849,29 +852,45 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
             </section>
 
             <section className="control-section">
-              <div className="section-heading"><span>PNG 热图</span><span className="section-meta">自动配准</span></div>
-              <Typography.Text type="secondary" className="annotation-help">热图颜色取自图片的近似采样，不可当作原始离子强度或用于定量。</Typography.Text>
-              <label className={`heatmap-file-picker${heatmapUploading ? ' is-disabled' : ''}`}>
-                <input key={`${project.id}-${heatmapVersion}`} type="file" accept="image/png,.png" aria-label="选择 PNG 热图" disabled={heatmapUploading} onChange={(event) => setHeatmapFile(event.target.files?.[0] ?? null)} />
-                <span className="heatmap-file-button"><FolderOpenOutlined /> 选择 PNG</span>
-                <span className="heatmap-file-name" title={heatmapFile?.name}>{heatmapFile ? heatmapFile.name : '更换或添加热图'}</span>
-              </label>
-              <Input size="small" aria-label="热图标注" placeholder="标注，例如 726.5025 m/z" value={heatmapLabel} onChange={(event) => setHeatmapLabel(event.target.value)} disabled={heatmapUploading} />
-              <Button size="small" icon={<UploadOutlined />} loading={heatmapUploading} disabled={!heatmapFile || !maldiAvailable} onClick={uploadHeatmap} style={{marginTop: 8}}>上传并自动配准</Button>
-              {!maldiAvailable && <div className="sidebar-empty-note">需要可用的 MALDI/SBD 坐标才能配准热图。</div>}
-              {heatmapUploading ? <div className="sidebar-empty-note">正在上传并自动配准…</div> : heatmapLoading ? <div className="sidebar-empty-note">正在读取热图…</div> : heatmap?.available ? (
-                <div className="sidebar-empty-note">配准完成 · {heatmap.label || heatmap.filename || 'PNG 热图'}<br />
-                  {heatmapOrientation(heatmap) && <>{heatmapOrientation(heatmap)} · </>}{heatmap.inliers != null && <>内点 {heatmap.inliers} · </>}{heatmap.error_p95_px != null && <>板图匹配误差 p95 {spotNumber(heatmap.error_p95_px, 2)} px</>}
+              <div className="section-heading"><span>MALDI 热图</span><Tooltip title="热图颜色为图像视觉采样值，非实际质谱离子强度，不可用于定量分析。"><span className="section-meta" tabIndex={0}>颜色参考</span></Tooltip></div>
+              {heatmapUploading ? <div className="sidebar-empty-note">正在上传并进行空间配准…</div> : heatmapLoading ? <div className="sidebar-empty-note">正在载入热图…</div> : heatmap?.available ? (
+                <div className="sidebar-empty-note">
+                  {heatmap.label || heatmap.filename || 'PNG 热图'}
                   {heatmap.warning && <><br />{heatmap.warning}</>}
                 </div>
-              ) : <div className="sidebar-empty-note">{heatmap?.warning || '尚未添加热图。'}</div>}
+              ) : <div className="sidebar-empty-note">{heatmap?.warning || '暂未导入热图，可按需添加。'}</div>}
               {heatmapError && <Alert type="error" showIcon message={heatmapError} />}
-              <div className="switch-row"><span><EyeOutlined /> 显示热图</span><Switch size="small" checked={showHeatmap} onChange={setShowHeatmap} disabled={!heatmap?.available || !heatmapColors.size} /></div>
-              <div className="parameter-block opacity-block"><div className="parameter-label"><span>热图透明度</span><span className="parameter-value">{heatmapOpacity}%</span></div><Slider min={0} max={100} value={heatmapOpacity} onChange={setHeatmapOpacity} disabled={!heatmap?.available} tooltip={{formatter: (value) => `${value}%`}} /></div>
+              {heatmap?.available && <>
+                <div className="switch-row"><span><EyeOutlined /> 显示热图</span><Switch size="small" checked={showHeatmap} onChange={setShowHeatmap} disabled={!heatmapColors.size} /></div>
+                <div className="parameter-block opacity-block"><div className="parameter-label"><span>热图透明度</span><span className="parameter-value">{heatmapOpacity}%</span></div><Slider min={0} max={100} value={heatmapOpacity} onChange={setHeatmapOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
+              </>}
+              <Collapse className="sidebar-collapse" ghost items={[{
+                key: 'upload',
+                label: heatmap?.available ? '更换热图' : '添加热图（可选）',
+                children: <>
+                  <label className={`heatmap-file-picker${heatmapUploading ? ' is-disabled' : ''}`}>
+                    <input key={`${project.id}-${heatmapVersion}`} type="file" accept="image/png,.png" aria-label="选择 PNG 热图" disabled={heatmapUploading} onChange={(event) => setHeatmapFile(event.target.files?.[0] ?? null)} />
+                    <span className="heatmap-file-button"><FolderOpenOutlined /> 选择文件</span>
+                    {heatmapFile && <span className="heatmap-file-name" title={heatmapFile.name}>{heatmapFile.name}</span>}
+                  </label>
+                  <Input size="small" aria-label="热图标注" placeholder="标注名称，如 726.5025 m/z（选填）" value={heatmapLabel} onChange={(event) => setHeatmapLabel(event.target.value)} disabled={heatmapUploading} />
+                  <Button size="small" icon={<UploadOutlined />} loading={heatmapUploading} disabled={!heatmapFile || !maldiAvailable} onClick={uploadHeatmap} style={{marginTop: 8}}>上传并自动配准</Button>
+                  {!maldiAvailable && <div className="sidebar-empty-note">需具备 MALDI/SBD 坐标数据方可配准热图。</div>}
+                </>,
+              }]} />
             </section>
 
-            <section className="control-section annotation-section">
-              <div className="section-heading"><span>灼烧坑人工赋值</span><span className="section-meta">{manualPoints.length} 个</span></div>
+            <Collapse className="sidebar-collapse" ghost activeKey={manualToolsOpen ? ['annotations'] : []} onChange={(keys) => {
+              const open = keys.includes('annotations');
+              setManualToolsOpen(open);
+              if (!open) {
+                setAnnotationMode(false);
+                resetPointEditor();
+              }
+            }} items={[{
+              key: 'annotations',
+              label: `补充标注${manualPoints.length ? ` · ${manualPoints.length} 个` : '（可选）'}`,
+              children: <div className="annotation-section">
               <Typography.Text type="secondary" className="annotation-help">在采集后图层点击灼烧坑，可自动匹配 SBD 点并录入人工值；人工记录单独保存，不改写原始数据。</Typography.Text>
               <Space wrap>
                 <Button size="small" type={annotationMode ? 'primary' : 'default'} onClick={toggleAnnotationMode} disabled={currentLayer !== 'after' || mode !== 'single'}>
@@ -915,7 +934,8 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                   ))}
                 </div>
               )}
-            </section>
+              </div>,
+            }]} />
 
             <Collapse className="sidebar-collapse" ghost items={[{
               key: 'details',
@@ -925,6 +945,11 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                 <div><span>配准方法</span><strong>{methodLabel(activeRegistration.method)}</strong></div>
                 <div><span>坐标模型</span><strong>{mapping?.coordinate_model ? `degree ${mapping.coordinate_model.degree}` : '—'}</strong></div>
                 <div><span>校准版本</span><strong>{mapping?.calibration_version ?? '—'}</strong></div>
+                {heatmap?.available && <>
+                  {heatmapOrientation(heatmap) && <div><span>热图方向</span><strong>{heatmapOrientation(heatmap)}</strong></div>}
+                  {heatmap.inliers != null && <div><span>热图有效匹配点</span><strong>{heatmap.inliers}</strong></div>}
+                  {heatmap.error_p95_px != null && <div><span>板图配准误差 p95</span><strong>{spotNumber(heatmap.error_p95_px, 2)} px</strong></div>}
+                </>}
                 {valueFields.length > 0 && <label className="sidebar-field"><span>点位 / 导出字段</span><Select size="small" value={selectedFieldKey || valueFields[0].key} onChange={setSelectedFieldKey} options={valueFields.map((field) => ({value: field.key, label: field.label}))} /></label>}
               </div>,
             }]} />
