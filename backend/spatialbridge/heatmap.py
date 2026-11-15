@@ -36,6 +36,33 @@ def _texture_features(sift: Any, image: np.ndarray) -> tuple[Any, Any]:
     return sift.detectAndCompute(gray, mask)
 
 
+def crop_board_reference(image: np.ndarray, world_to_board: np.ndarray,
+                         world_x: np.ndarray, world_y: np.ndarray,
+                         selected: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Match the acquisition region, rather than unrelated regions on a board.
+
+    Keep a texture margin around the mapped SBD extent and translate World2Px
+    into the cropped frame so subsequent colour sampling uses the same pixels.
+    """
+    if world_to_board.shape != (3, 3) or not np.isfinite(world_to_board).all():
+        raise HeatmapRegistrationError("SBD 板图坐标变换无效")
+    world = np.column_stack((world_x, world_y, np.ones(len(world_x))))
+    projected = world @ world_to_board.T
+    with np.errstate(divide="ignore", invalid="ignore"):
+        points = projected[:, :2] / projected[:, 2:3]
+    points = points[np.asarray(selected, dtype=bool) & np.isfinite(points).all(axis=1)]
+    if not len(points):
+        raise HeatmapRegistrationError("SBD 主扫描区域没有可用的板图坐标")
+    lower, upper = points.min(axis=0), points.max(axis=0)
+    margin = np.maximum((upper - lower) * .2, 64)
+    left, top = np.maximum(np.floor(lower - margin), 0).astype(int)
+    right, bottom = np.minimum(np.ceil(upper + margin), [image.shape[1], image.shape[0]]).astype(int)
+    if right <= left or bottom <= top:
+        raise HeatmapRegistrationError("SBD 主扫描区域不在参考板图内")
+    translation = np.array([[1., 0., -left], [0., 1., -top], [0., 0., 1.]])
+    return image[top:bottom, left:right], translation @ world_to_board
+
+
 def match_heatmap(source: np.ndarray, reference: np.ndarray) -> dict[str, Any]:
     """Find the source→reference homography, allowing rotations and reflections.
 

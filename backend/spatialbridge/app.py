@@ -27,7 +27,7 @@ import numpy as np
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from .heatmap import SAMPLING_VERSION, HeatmapRegistrationError, match_heatmap, sample_spot_colours
+from .heatmap import SAMPLING_VERSION, HeatmapRegistrationError, crop_board_reference, match_heatmap, sample_spot_colours
 from .lattice import evaluate_coordinate_model
 from .registration import build_project, make_browser_preview
 from .storage import Store
@@ -730,12 +730,19 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
         report = project.get("report") or {}
         mapping = report.get("spatial_mapping") or {}
         reference = (mapping.get("heatmap") or {}).get("path")
-        world_to_reference = np.asarray((mapping.get("matrices") or {}).get("world_to_heat"), dtype=float)
+        use_board = not reference
+        matrices = mapping.get("matrices") or {}
+        world_to_reference = np.asarray(matrices.get("world_to_heat"), dtype=float)
+        if not reference:
+            # Three-file imports align SBD directly through its optical board.
+            # Match new ion heat maps to that same board and sample in its frame.
+            reference = (mapping.get("board") or {}).get("path")
+            world_to_reference = np.asarray(matrices.get("world_to_board"), dtype=float)
         if not mapping.get("available") or not reference or world_to_reference.shape != (3, 3):
-            raise HTTPException(400, "此项目缺少可用的参考热图和 SBD 坐标映射")
+            raise HTTPException(400, "此项目缺少可用的参考图像或 SBD 坐标映射")
         reference_path = resolve_project_file(reference, project_id)
         if not reference_path.is_file():
-            raise HTTPException(400, "参考热图文件不可用，请先重新导入项目来源")
+            raise HTTPException(400, "参考图像文件不可用，请先重新导入项目来源")
         def process() -> dict:
             try:
                 with Image.open(io.BytesIO(contents)) as image:
@@ -746,11 +753,17 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
                 reference_image = cv2.imread(str(reference_path), cv2.IMREAD_COLOR)
                 if source is None or reference_image is None:
                     raise HeatmapRegistrationError("无法读取热图或项目参考热图")
-                result = match_heatmap(source, reference_image)
                 arrays = load_spot_arrays(spot_cache(project_id, project))
-                colors, valid = sample_spot_colours(source, world_to_reference, result["matrix"],
-                                                     arrays["world_x"], arrays["world_y"], arrays["mapped"])
                 primary = int(mapping.get("primary_raster", 0))
+                sampling_matrix = world_to_reference
+                if use_board:
+                    selected = (arrays["raster"] == primary) & arrays["mapped"].astype(bool)
+                    reference_image, sampling_matrix = crop_board_reference(
+                        reference_image, sampling_matrix, arrays["world_x"], arrays["world_y"], selected,
+                    )
+                result = match_heatmap(source, reference_image)
+                colors, valid = sample_spot_colours(source, sampling_matrix, result["matrix"],
+                                                     arrays["world_x"], arrays["world_y"], arrays["mapped"])
                 primary_total = int(np.count_nonzero((arrays["raster"] == primary) & arrays["mapped"].astype(bool)))
                 primary_valid = int(np.count_nonzero((arrays["raster"] == primary) & valid))
                 if primary_total == 0 or primary_valid < max(10, primary_total * .3):
