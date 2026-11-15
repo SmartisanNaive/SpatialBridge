@@ -143,6 +143,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const savedViewportRef = useRef<Viewport | null>(null);
   const savedSettingsRef = useRef<Partial<WorkspaceSettings>>({});
   const sessionHydratedRef = useRef(false);
+  const sessionPersistRef = useRef<(() => void) | null>(null);
   const spotRequestRef = useRef(0);
   const sessionKey = `spatialbridge:session:${project.id}`;
   const [messageApi, holder] = message.useMessage();
@@ -363,16 +364,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const updateViewport = (next: Viewport) => {
     viewportRef.current = next;
     setViewport(next);
-    if (sessionHydratedRef.current) {
-      try {
-        const current = window.sessionStorage.getItem(sessionKey);
-        let existing: Record<string, unknown> = {};
-        try { existing = current ? JSON.parse(current) : {}; } catch { existing = {}; }
-        window.sessionStorage.setItem(sessionKey, JSON.stringify({...existing, viewport: next}));
-      } catch {
-        // Session storage is optional; state remains usable in memory.
-      }
-    }
   };
 
   const preSource = report?.sources.find((source) => source.key === 'pre');
@@ -404,13 +395,26 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       sidebarOpen,
       reducedMotion,
     };
-    try {
-      window.sessionStorage.setItem(sessionKey, JSON.stringify({version: 2, viewport, settings}));
-    } catch {
-      // Session storage is an enhancement; the server saved view remains the
-      // durable fallback when storage is unavailable.
-    }
+    const persist = () => {
+      try {
+        window.sessionStorage.setItem(sessionKey, JSON.stringify({version: 2, viewport: viewportRef.current, settings}));
+      } catch {
+        // Session storage is optional; the server saved view remains available.
+      }
+    };
+    sessionPersistRef.current = persist;
+    const timer = window.setTimeout(persist, 250);
+    window.addEventListener('pagehide', persist);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pagehide', persist);
+    };
   }, [comparePosition, currentLayer, lensFixed, lensOverlap, lensSize, mode, overlayOpacity, reducedMotion, sessionKey, showGrid, showPits, sidebarOpen, swapLayers, viewport]);
+
+  useEffect(() => () => {
+    sessionPersistRef.current?.();
+    sessionPersistRef.current = null;
+  }, [sessionKey]);
 
   if (!report || !preSource || !afterSource) return <>{holder}<div className="canvas-empty">该项目缺少可用的显微图配准结果。</div></>;
 

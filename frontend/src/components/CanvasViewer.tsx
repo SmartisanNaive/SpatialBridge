@@ -1266,7 +1266,7 @@ export function CanvasViewer({
               opacity: {duration: lensOpacityDuration, ease: 'easeInOut'},
               clipPath: {duration: lensClipDuration, ease: 'easeInOut'},
             }
-          : {duration: isSingle && activeTransition ? (reducedMotion ? 0 : .48) : 0, ease: 'easeInOut'}}
+          : {duration: isSingle && activeTransition ? (reducedMotion ? 0 : .2) : 0, ease: 'easeInOut'}}
         onAnimationComplete={() => {
           const currentSingle = singleTransitionRef.current;
           if (isSingle && currentSingle?.to === value) finishSingleTransition(currentSingle.id);
@@ -1337,8 +1337,12 @@ export function CanvasViewer({
           </>
         )}
       </AnimatePresence>
-      <div className={`coverage ${tileError ? 'coverage-error' : ''}${transitionPending ? ' coverage-preparing' : ''}`}>
-        {transitionPending ? `${preparingText(layerLabel(transitionPending), loadProgress)}${tileError ? ' · 部分瓦片暂未加载，正在重试' : ''}` : tileError ? '部分图像瓦片暂未加载，正在自动重试…' : outside ? '当前视野位于该图层覆盖范围外' : gridSampled && showGrid ? '当前缩放下已简化显示点位，放大查看点位' : compare ? '共享视野 · 卷帘对比' : lens ? '共享视野 · 透镜对比' : '前后显微图区域级对齐'}
+      <div className={`coverage ${tileError && !transitionPending ? 'coverage-error' : ''}${transitionPending ? ' coverage-preparing' : ''}`} role="status" aria-live="polite" aria-atomic="true">
+        {transitionPending ? <>
+          <strong>正在切换至{layerLabel(transitionPending)}…</strong>
+          <span className="coverage-detail">{preparingText(layerLabel(transitionPending), loadProgress)}</span>
+          {tileRetryingRef.current[transitionPending] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
+        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridSampled && showGrid ? '当前缩放下已抽稀显示，放大可查看完整点位' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
         {transitionPending && <span className="coverage-progress" aria-hidden="true"><span /></span>}
       </div>
     </div>
@@ -1346,8 +1350,8 @@ export function CanvasViewer({
 }
 
 function preparingText(label: string, progress: {loaded: number; seconds: number; slow: boolean} | null) {
-  const base = `正在准备${label}图像`;
-  if (!progress || progress.seconds < 1) return `${base}…`;
-  const detail = `已加载 ${progress.loaded} 块 · ${progress.seconds}s`;
-  return progress.slow ? `${base}，加载较慢，仍在加载 · ${detail}` : `${base} · ${detail}`;
+  const base = `正在准备${label}当前视野`;
+  if (!progress || progress.seconds < 1) return `${base}，就绪后自动显示`;
+  const detail = progress.loaded > 0 ? `本次新增载入 ${progress.loaded} 块 · 已等待 ${progress.seconds}s` : `已等待 ${progress.seconds}s`;
+  return progress.slow ? `加载耗时较长，仍在处理中 · ${detail}` : detail;
 }
