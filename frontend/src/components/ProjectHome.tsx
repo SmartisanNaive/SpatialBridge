@@ -101,6 +101,7 @@ export function ProjectHome({
     apiFetch<UploadSession>(`/uploads/${encodeURIComponent(storedId)}`).then(async (value) => {
       if (['pending', 'assembling', 'failed'].includes(value.status)) {
         setSession(value);
+        setProjectNameInput(value.project_name ?? '');
         setFileProgress(Object.fromEntries(value.files.map((file) => [file.id, file.size ? Math.round(file.uploaded_size / file.size * 100) : 0])));
         setUploadStatus(value.status === 'assembling'
           ? '服务器正在合并上次上传的文件。请重新选择相同文件后查看进度。'
@@ -126,7 +127,6 @@ export function ProjectHome({
     }
     setUploadError('');
     setSelected((current) => ({...current, [role]: role === 'heatmap' ? [...current[role], ...accepted] : [accepted[0]]}));
-    if (role === 'pre' && !projectNameInput.trim()) setProjectNameInput(accepted[0].name);
   };
 
   const removeFile = (role: UploadRole, index: number) => setSelected((current) => ({...current, [role]: current[role].filter((_, itemIndex) => itemIndex !== index)}));
@@ -180,6 +180,7 @@ export function ProjectHome({
     }
     window.localStorage.removeItem(uploadSessionStorageKey);
     setSession(null);
+    setProjectNameInput('');
     setUploading(false);
     setPaused(false);
     setUploadStatus('上传已取消。');
@@ -247,9 +248,10 @@ export function ProjectHome({
       if (!currentSession) {
         currentSession = await apiFetch<UploadSession>('/uploads', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({project_name: projectNameInput.trim() || selected.pre[0].name, files: uploadFiles.map(({role, file}) => ({role, filename: file.name, size: file.size}))}),
+          body: JSON.stringify({project_name: projectNameInput.trim() || null, files: uploadFiles.map(({role, file}) => ({role, filename: file.name, size: file.size}))}),
         });
         setSession(currentSession);
+        setProjectNameInput(currentSession.project_name ?? '');
         setFileProgress(Object.fromEntries(currentSession.files.map((file) => [file.id, file.size ? Math.round(file.uploaded_size / file.size * 100) : 0])));
         window.localStorage.setItem(uploadSessionStorageKey, currentSession.id);
       }
@@ -378,7 +380,7 @@ export function ProjectHome({
             <div className="home-card-kicker">新建项目</div>
             <Typography.Title level={3}>上传项目文件</Typography.Title>
             <Typography.Text type="secondary">采集前和采集后 PNG 必填；SBD 和热图可选。SBD 会先在本机提取配准所需数据；PNG 自动尝试无损优化，已充分压缩的图片直接上传。像素、尺寸和原始文件保持不变。文件分片上传，网络中断后可以继续。</Typography.Text>
-            <Input aria-label="项目名称" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} placeholder="项目名称（可选）" disabled={uploading || busy} />
+            <Input aria-label="项目名称" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} placeholder="自定义项目名称（留空则使用创建时间戳）" maxLength={200} disabled={uploading || busy || !!session} />
             <div className="upload-file-pickers">
               {uploadRoles.map((role) => <div className="upload-file-picker" key={role}>
                 <input ref={(element) => {inputRefs.current[role] = element;}} type="file" accept={uploadRoleExtensions[role].join(',')} multiple={role === 'heatmap'} hidden onChange={(event) => {addFiles(role, Array.from(event.target.files ?? [])); event.currentTarget.value = '';}} />

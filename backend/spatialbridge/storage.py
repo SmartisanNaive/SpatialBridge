@@ -159,7 +159,9 @@ class Store:
         return [self._project_from_row(r) for r in rows]
 
     def create_upload(self, upload_id: str, project_name: str | None, files: list[dict[str, Any]]) -> dict[str, Any]:
-        created_at = datetime.now(timezone.utc).isoformat()
+        created = datetime.now(timezone.utc)
+        created_at = created.isoformat()
+        project_name = (project_name or "").strip() or created.astimezone().strftime("%Y-%m-%d_%H-%M-%S-%f")
         with self._lock:
             self.db.execute("""INSERT INTO uploads
               (id, created_at, project_name, status, completed_project_id, manifest, error)

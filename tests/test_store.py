@@ -195,6 +195,22 @@ def test_gzip_chunks_are_stored_decompressed_and_bounded_by_the_declared_size(tm
     assert put(second["id"], packed).json()["duplicate"] is True
 
 
+@pytest.mark.parametrize("name", [None, "", "   ", "  样本 A  "])
+def test_upload_name_is_saved_and_defaults_to_creation_timestamp(tmp_path, name):
+    from datetime import datetime
+
+    client = TestClient(create_app(tmp_path))
+    payload = {"files": [{"role": "pre", "filename": "before.png", "size": 10}]}
+    if name is not None:
+        payload["project_name"] = name
+    response = client.post("/api/uploads", json=payload)
+    assert response.status_code == 201
+    upload = response.json()
+    expected = (name or "").strip() or datetime.fromisoformat(upload["created_at"]).astimezone().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    assert upload["project_name"] == expected
+    assert client.get(f"/api/uploads/{upload['id']}").json()["project_name"] == expected
+
+
 def test_upload_chunks_are_resumable_and_completion_is_idempotent(tmp_path):
     client = TestClient(create_app(tmp_path))
     image_path = tmp_path / "arbitrary-name.png"
