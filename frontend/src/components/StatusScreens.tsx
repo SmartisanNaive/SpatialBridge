@@ -19,7 +19,7 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
         <Card className="processing-card" variant="borderless">
           <div className="processing-icon"><Spin /></div>
           <Typography.Title level={2}>{project.status === 'queued' ? '项目排队中' : '正在建立空间配准'}</Typography.Title>
-          <Typography.Paragraph type="secondary">{project.import_type === 'upload' ? '上传文件已保存，可在处理完成后查看原始文件名。' : (project.source_dir || '来源目录未知')}</Typography.Paragraph>
+          <Typography.Paragraph type="secondary">正在对齐采集前后图像并关联采样点，完成后将自动进入工作台。</Typography.Paragraph>
           <div className="processing-stage"><span>当前阶段</span><strong>{stage}</strong>{hasTotal && <em>{Number(progress?.completed)} / {Number(progress?.total)}</em>}</div>
           {hasTotal && <Progress percent={percent} showInfo strokeColor="#2d6a5b" />}
           {!hasTotal && <div className="processing-indeterminate"><div className="processing-indeterminate-bar" aria-hidden="true"><span /></div><span>处理阶段会随任务推进更新，完成后自动打开工作台。</span></div>}
