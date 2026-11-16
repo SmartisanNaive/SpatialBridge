@@ -849,23 +849,34 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
                 logger.warning("Default heatmap could not be prepared for %s: %s", project_id, error)
                 return {"available": False, "warning": "内置热图自动配准失败，请检查示例数据。"}
         if not metadata.get("available") and not is_demo:
-            # The heat map supplied with the project is the registration
-            # reference; show it without asking for a second upload.
+            # A project may be calibrated directly through the SBD board.
+            # Its uploaded ion maps then live in the manifest, not mapping.heatmap.
             mapping = (project.get("report") or {}).get("spatial_mapping") or {}
             reference = mapping.get("heatmap") or {}
-            if mapping.get("available") and reference.get("path"):
+            candidates = [reference] if reference.get("path") else []
+            upload_id = project.get("upload_id")
+            if upload_id and not candidates:
+                upload = store.get_upload(upload_id)
+                candidates = [{**item, "path": str(upload_file_path(upload_id, item))}
+                              for item in (upload or {}).get("manifest") or [] if item.get("role") == "heatmap"]
+            if candidates and not mapping.get("available"):
+                return {"available": False, "warning": "热图已上传，但 SBD 与显微图的坐标对应关系尚不可用。"}
+            for candidate in candidates:
                 try:
-                    reference_path = resolve_project_file(reference["path"], project_id)
+                    reference_path = resolve_project_file(candidate["path"], project_id)
                     with heatmap_lock:
                         metadata = heatmap_metadata(project_id)
-                        if not metadata.get("available") and reference_path.is_file():
-                            filename = reference.get("filename") or reference_path.name
-                            mz = reference.get("mz")
+                        if not metadata.get("available"):
+                            filename = candidate.get("filename") or reference_path.name
+                            mz = candidate.get("mz")
                             metadata = prepare_heatmap(project_id, project, reference_path.read_bytes(), filename,
                                                        f"{mz} m/z" if mz else filename, "project")
+                    return metadata
                 except (HeatmapRegistrationError, HTTPException, OSError, ValueError) as error:
-                    logger.warning("Project heatmap could not be prepared for %s: %s", project_id, error)
-                    return {"available": False, "warning": "随项目上传的热图无法自动显示，可在此重新上传。"}
+                    logger.warning("Project heatmap could not be prepared for %s (%s): %s",
+                                   project_id, candidate.get("filename"), error)
+            if candidates:
+                return {"available": False, "warning": "热图已上传，但自动配准失败，请检查热图与采集区域是否对应。"}
         return metadata
 
     @app.post("/api/projects/{project_id}/heatmap")
