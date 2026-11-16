@@ -1,8 +1,8 @@
-import {useRef, useState, type ReactNode} from 'react';
+import {useEffect, useRef, useState, type ReactNode} from 'react';
 import {AnimatePresence, motion, useDragControls, useReducedMotion, type PanInfo} from 'motion/react';
 import './CardSwap.css';
 
-export type SwapCard = {id: string; content: ReactNode};
+export type SwapCard = {id: string; label?: string; content: ReactNode};
 
 export default function CardSwap({items, activeId, onChange}: {
   items: SwapCard[];
@@ -13,12 +13,33 @@ export default function CardSwap({items, activeId, onChange}: {
   const dragControls = useDragControls();
   const [leaving, setLeaving] = useState<{card: SwapCard; x: number; direction: number; token: number} | null>(null);
   const sequence = useRef(0);
+  const queuedSteps = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const advanceRef = useRef<(direction: number) => void>(() => {});
+  const cancelQueue = () => {
+    queuedSteps.current.forEach(clearTimeout);
+    queuedSteps.current = [];
+  };
+  const itemIds = items.map(item => item.id).join('\0');
+  useEffect(() => cancelQueue, [itemIds]);
   const active = Math.max(0, items.findIndex(item => item.id === activeId));
   const visible = Array.from({length: Math.min(4, items.length)}, (_, i) => items[(active + i) % items.length]);
-  const shift = (direction: number, x = 0) => {
+  const shift = (direction: number, x = 0, keepQueue = false) => {
+    if (!keepQueue) cancelQueue();
     if (items.length < 2) return;
     if (!reduce) setLeaving({card: items[active], x, direction, token: ++sequence.current});
     onChange(items[(active + direction + items.length) % items.length].id);
+  };
+  advanceRef.current = direction => shift(direction, 0, true);
+  const bringToFront = (position: number) => {
+    cancelQueue();
+    if (reduce) {
+      onChange(visible[position].id);
+      return;
+    }
+    advanceRef.current(1);
+    for (let step = 1; step < position; step++) {
+      queuedSteps.current.push(setTimeout(() => advanceRef.current(1), step * 220));
+    }
   };
   const finishDrag = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (Math.abs(info.offset.x) > 60 || Math.abs(info.velocity.x) > 500) {
@@ -37,9 +58,19 @@ export default function CardSwap({items, activeId, onChange}: {
         key={card.id}
         className="card-swap-slot"
         data-front={position === 0 ? '' : undefined}
-        aria-hidden={position !== 0}
-        {...{inert: position === 0 ? undefined : ''}}
-        style={{zIndex: 10 - position, pointerEvents: position === 0 ? 'auto' : 'none'}}
+        data-card-id={card.id}
+        role={position > 0 ? 'button' : undefined}
+        tabIndex={position > 0 ? 0 : undefined}
+        aria-label={position > 0 ? `将${card.label ?? '此项目'}移到最前面` : undefined}
+        onClick={() => { if (position > 0) bringToFront(position); }}
+        onKeyDown={event => {
+          if (position > 0 && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            event.stopPropagation();
+            bringToFront(position);
+          }
+        }}
+        style={{zIndex: 10 - position}}
         initial={false}
         animate={{x: position * 17, y: -position * 20, z: -position * 55,
           rotate: position * 1.2, scale: 1, opacity: 1}}
@@ -52,11 +83,14 @@ export default function CardSwap({items, activeId, onChange}: {
         dragSnapToOrigin
         onPointerDown={event => {
           if (position === 0 && items.length > 1 && event.button === 0 &&
-              !(event.target as Element).closest('button,a,input')) dragControls.start(event);
+              !(event.target as Element).closest('button,a,input')) {
+            cancelQueue();
+            dragControls.start(event);
+          }
         }}
         onDragEnd={finishDrag}
       >
-        {card.content}
+        <div className="card-swap-content" aria-hidden={position !== 0} {...{inert: position === 0 ? undefined : ''}}>{card.content}</div>
         <span className="card-swap-shade" aria-hidden="true" style={{opacity: position * .08}} />
       </motion.div>)}
       <AnimatePresence>

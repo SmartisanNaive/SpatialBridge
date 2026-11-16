@@ -35,7 +35,7 @@ export default function HistoryProjects({projects, onOpen, onRetry, busy}: {
     {view === 'cards' ? <CardSwap activeId={active.id} onChange={setSelectedId} items={projects.map(project => {
       const source = project.report?.sources?.find(item => item.key === 'pre');
       const spots = project.report?.maldi_data?.spot_count;
-      return {id: project.id, content: <article className="history-project-card" aria-label={projectName(project)}>
+      return {id: project.id, label: projectName(project), content: <article className="history-project-card" aria-label={projectName(project)}>
         {failedImages.has(project.id)
           ? <div className="history-project-image history-project-image-placeholder"><span><PictureOutlined /> 暂无预览图</span></div>
           : <img className="history-project-image" src={apiUrl(`/projects/${encodeURIComponent(project.id)}/thumbnail`)}

@@ -21,6 +21,9 @@
   box-shadow: 0 18px 35px -20px rgba(27, 55, 48, .35), inset 0 1px 0 #fff;
   overflow: hidden;
 }
+.card-swap-content { height: 100%; }
+.card-swap-slot[role="button"] { cursor: pointer; }
+.card-swap-slot[role="button"]:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .card-swap-slot[data-front] { cursor: grab; touch-action: pan-y; }
 .card-swap-slot[data-front]:active { cursor: grabbing; }
 .card-swap-leaving { z-index: 20; pointer-events: none; }
