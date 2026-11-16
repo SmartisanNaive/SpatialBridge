@@ -23,7 +23,7 @@ import {apiUrl, apiFetch, errorText} from '../api';
 
 export const uploadRoleLabels: Record<UploadRole, string> = {
   pre: '采集前显微图（PNG）', after: '采集后显微图（PNG）', sbd: 'SBD 数据（可选）',
-  heatmap: 'MALDI 热图（PNG，可多选）',
+  heatmap: 'MALDI 热图 (PNG)',
 };
 export const uploadRoleExtensions: Record<UploadRole, string[]> = {
   pre: ['.png'], after: ['.png'], sbd: ['.sbd'], heatmap: ['.png'],

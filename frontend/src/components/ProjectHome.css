@@ -1,3 +1,13 @@
+.home-import-card .ant-card-body > .ant-typography-secondary {
+  display: block;
+  margin-bottom: 0;
+}
+
+.home-import-card .ant-card-body > .ant-input {
+  display: block;
+  margin-top: 14px;
+}
+
 /* Match the history gallery to the adjacent upload card. */
 .project-home .home-lens-card {
   position: relative;
