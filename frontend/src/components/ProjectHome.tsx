@@ -1,6 +1,7 @@
 import './ProjectHome.css';
 import HistoryProjects from './HistoryProjects';
 import LetterGlitch from './LetterGlitch';
+import StatusMark, {type MarkStatus} from './StatusMark';
 import {useEffect, useRef, useState} from 'react';
 import {Alert, Button, Card, Input, Layout, Progress, Space, Typography} from 'antd';
 import {
@@ -77,6 +78,7 @@ export function ProjectHome({
   const [projectNameInput, setProjectNameInput] = useState('');
   const [session, setSession] = useState<UploadSession | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadCompleted, setUploadCompleted] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [sbdExtraction, setSbdExtraction] = useState<{source: File; result: SbdExtraction} | null>(null);
   const extractionRef = useRef<{source: File; result: SbdExtraction} | null>(null);
@@ -147,6 +149,17 @@ export function ProjectHome({
   const legacySbdSession = !!session?.files.some((file) => file.role === 'sbd' && file.filename.toLowerCase().endsWith('.sbd'));
   const canStart = selected.pre.length === 1 && selected.after.length === 1 && !uploading && !busy && !legacySbdSession;
 
+  const fileStatus = (percent: number | undefined): {status: MarkStatus; label: string; progress?: number} => {
+    if (uploadCompleted || percent != null && percent >= 100) return {status: 'done', label: '已上传'};
+    if (percent == null) return {status: 'done', label: '已选择'};
+    if (uploadError) return {status: 'failed', label: '上传中断'};
+    if (paused) return {status: 'paused', label: '已暂停'};
+    if (uploading && !extracting) return {status: 'running', label: '上传中', progress: percent / 100};
+    return {status: 'pending', label: '等待上传'};
+  };
+  const overallStatus: MarkStatus = uploadCompleted ? 'done' : uploadError ? 'failed'
+    : paused ? 'paused' : cancelRef.current ? 'cancelled' : 'running';
+
   const waitIfPaused = async () => {
     while (pauseRef.current && !cancelRef.current) await new Promise<void>((resolve) => window.setTimeout(resolve, 180));
     if (cancelRef.current) throw new Error('上传已取消');
@@ -192,8 +205,23 @@ export function ProjectHome({
     setFileProgress({});
   };
 
+  const showUploadComplete = async (project: Project) => {
+    // Server work is finished; each pause only lets the mark finish its animation.
+    setUploadStatus('文件上传完成');
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduce) {
+      await new Promise<void>(resolve => window.setTimeout(resolve, 700));
+      setUploadCompleted(true);
+      await new Promise<void>(resolve => window.setTimeout(resolve, 1500));
+    }
+    setSession(null);
+    setFileProgress({});
+    onProject(project);
+  };
+
   const startUpload = async () => {
     if (!canStart) return;
+    setUploadCompleted(false);
     setUploadError('');
     setUploadStatus('准备上传…');
     setUploadedBytes(0);
@@ -262,16 +290,13 @@ export function ProjectHome({
       if (currentSession.status === 'completed' && currentSession.completed_project_id) {
         const project = await apiFetch<Project>(`/projects/${encodeURIComponent(currentSession.completed_project_id)}`);
         window.localStorage.removeItem(uploadSessionStorageKey);
-        setSession(null);
-        onProject(project);
+        await showUploadComplete(project);
         return;
       }
       if (['assembling', 'failed'].includes(currentSession.status)) {
         const project = await finishUpload(currentSession.id);
         window.localStorage.removeItem(uploadSessionStorageKey);
-        setSession(null);
-        setFileProgress({});
-        onProject(project);
+        await showUploadComplete(project);
         return;
       }
       const used = new Set<number>();
@@ -350,8 +375,7 @@ export function ProjectHome({
       const project = await finishUpload(currentSession.id);
       window.localStorage.removeItem(uploadSessionStorageKey);
       setSession(null);
-      setFileProgress({});
-      onProject(project);
+      await showUploadComplete(project);
     } catch (error) {
       if (!cancelRef.current) {
         setPaused(true);
@@ -393,8 +417,9 @@ export function ProjectHome({
                   const preparedFile = prepareFile(role, file);
                   const remote = session?.files.find((item) => item.role === role && item.filename === preparedFile.name && item.size === preparedFile.size);
                   const percent = remote ? (fileProgress[remote.id] ?? 0) : undefined;
-                  return <div className="upload-selected-file" key={`${file.name}-${file.size}-${index}`}><div className="upload-selected-file-main"><span title={file.name}>{file.name}</span>{percent != null && <Progress percent={percent} size="small" showInfo={false} strokeColor="#2d6a5b" />}</div><Button type="text" size="small" disabled={uploading} onClick={() => removeFile(role, index)}>移除</Button></div>;
-                })}</div> : <span className="upload-empty">尚未选择</span>}
+                  const mark = fileStatus(percent);
+                  return <div className="upload-selected-file" key={`${file.name}-${file.size}-${index}`}><div className="upload-selected-file-main"><div style={{display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}><StatusMark status={mark.status} progress={mark.progress} size={16} /><span title={file.name} style={{fontWeight: 500}}>{file.name}</span><span className="upload-file-state" data-status={mark.status}>{mark.label}</span></div>{percent != null && <Progress percent={percent} size="small" showInfo={false} strokeColor="#2d6a5b" />}</div><Button type="text" size="small" disabled={uploading} onClick={() => removeFile(role, index)}>移除</Button></div>;
+                })}</div> : <StatusMark className="upload-empty" status="pending" size={14} fontSize={10} label="尚未选择" />}
               </div>)}
             </div>
             {sbdExtraction && sbdExtraction.source === selected.sbd[0] && <Typography.Paragraph type="secondary">SBD 已在本地提取：{(sbdExtraction.result.stats.sourceBytes / 1024 / 1024).toFixed(1)} MB → {(sbdExtraction.result.file.size / 1024 / 1024).toFixed(1)} MB，仅上传精简数据。</Typography.Paragraph>}
@@ -402,10 +427,20 @@ export function ProjectHome({
               ? `图片已无损优化：${(originalImageBytes / 1024 / 1024).toFixed(1)} MB → ${(optimizedImageBytes / 1024 / 1024).toFixed(1)} MB，像素与尺寸保持不变。`
               : '图片检查完成，复用原图上传；已压缩或重压无收益的图片不重复处理。'}</Typography.Paragraph>}
             {session && <Alert type="info" showIcon message="发现可恢复的上传会话" description={legacySbdSession ? '这是旧版完整 SBD 上传。请先点击“取消上传”释放该会话的数据，再重新开始，改用本地精简上传。' : uploadSessionMatches(session, preparedSelection) ? '已匹配本地文件，可以继续上传。' : '请重新选择与上次相同的文件；SBD 会在本地重新提取后匹配上传会话。'} />}
-            {extracting && <div role="status"><Typography.Paragraph>{uploadStatus}</Typography.Paragraph></div>}
-            {!extracting && (uploading || uploadedBytes > 0 || (session && uploadStatus)) && <div className="upload-progress-block"><div className="upload-progress-heading"><span>{uploadStatus || '准备上传…'}</span><span>{totalBytes ? `${Math.round(uploadedBytes / totalBytes * 100)}%` : '—'}</span></div><Progress percent={totalBytes ? Math.min(100, Math.round(uploadedBytes / totalBytes * 100)) : 0} showInfo={false} strokeColor="#2d6a5b" /><Typography.Text type="secondary">{(uploadedBytes / 1024 / 1024).toFixed(1)} / {(Math.max(totalBytes, selectedTotal) / 1024 / 1024).toFixed(1)} MB</Typography.Text></div>}
+            {(extracting || uploading || uploadedBytes > 0 || (session && uploadStatus)) && <div className="upload-progress-block" role="status">
+              <div className="upload-progress-heading">
+                <StatusMark status={overallStatus} progress={!extracting && totalBytes > 0 ? Math.min(1, uploadedBytes / totalBytes) : undefined}
+                  size={20} label={uploadStatus || '准备上传…'} />
+                {!extracting && totalBytes > 0 && <span className="upload-progress-percent">文件已上传 {Math.min(100, Math.round(uploadedBytes / totalBytes * 100))}%</span>}
+              </div>
+              {!extracting && totalBytes > 0 && <>
+                <Progress percent={Math.min(100, Math.round(uploadedBytes / totalBytes * 100))} showInfo={false}
+                  status={uploadError ? 'exception' : uploadCompleted ? 'success' : 'normal'} strokeColor="#2d6a5b" />
+                <Typography.Text type="secondary">{(uploadedBytes / 1024 / 1024).toFixed(1)} / {(Math.max(totalBytes, selectedTotal) / 1024 / 1024).toFixed(1)} MB</Typography.Text>
+              </>}
+            </div>}
             <Space wrap className="home-actions">
-              <Button type="primary" onClick={startUpload} disabled={!canStart} loading={uploading && !paused}>开始上传并处理</Button>
+              <Button type="primary" onClick={startUpload} disabled={!canStart} loading={uploading && !paused && !uploadCompleted}>{uploadCompleted ? '上传完成' : '开始上传并处理'}</Button>
               {uploading && !extracting && session && session.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}>{paused ? '继续上传' : '暂停上传'}</Button>}
               {!uploading && paused && session && <Button icon={<PlayCircleOutlined />} onClick={startUpload}>继续上传</Button>}
               {(extracting || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}>{extracting ? '取消本地处理' : '取消上传'}</Button>}

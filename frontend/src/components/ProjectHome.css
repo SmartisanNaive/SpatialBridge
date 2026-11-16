@@ -33,6 +33,33 @@
   margin-top: 14px;
 }
 
+.home-import-card .upload-empty.status-mark {
+  display: flex;
+  margin-top: 7px;
+}
+
+.home-import-card .upload-selected-file-main > div {
+  flex-wrap: wrap;
+  row-gap: 4px !important;
+}
+
+.home-import-card .upload-selected-file-main > div > .status-mark {
+  flex: 0 0 auto;
+}
+
+.upload-file-state { color: var(--green); font-size: 10px; }
+.upload-file-state[data-status="pending"] { color: var(--muted); }
+.upload-file-state[data-status="failed"] { color: #b65b51; }
+.upload-file-state[data-status="paused"] { color: #8b7860; }
+.home-import-card .upload-progress-block { padding: 12px; }
+.home-import-card .upload-progress-heading { align-items: center; gap: 10px; }
+.home-import-card .upload-progress-heading > .status-mark { flex: 1; }
+.upload-progress-percent { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+
+@media (max-width: 480px) {
+  .home-import-card .upload-progress-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+}
+
 /* Match the history gallery to the adjacent upload card. */
 .project-home .home-lens-card {
   position: relative;
