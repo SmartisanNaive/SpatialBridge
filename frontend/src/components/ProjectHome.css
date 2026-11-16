@@ -1,0 +1,119 @@
+/* Match the history gallery to the adjacent upload card. */
+.project-home .home-lens-card {
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid #e0e6e4;
+  border-radius: 14px;
+  box-shadow: 0 18px 54px rgba(27, 55, 48, .07);
+}
+
+.home-lens-card > .rays-svg,
+.home-lens-card > .beams-svg {
+  display: none;
+}
+
+.project-home .home-lens-card .home-card-kicker {
+  color: var(--green);
+}
+
+.project-home .home-lens-heading h3 {
+  color: #22322e !important;
+}
+
+.project-home .home-lens-count {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: #d4e8de;
+}
+
+.project-home .lens-view-viewport {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.project-home .lens-hint-overlay {
+  color: #35564a;
+  background: rgba(248, 250, 249, .9);
+  border-color: #d4e8de;
+}
+
+.project-home .lens-hint-dot {
+  background: #5b8878;
+  box-shadow: none;
+}
+
+.project-home .lens-project-title {
+  color: #345047;
+}
+
+.project-home .lens-project-specs {
+  color: var(--muted);
+}
+
+.project-home .lens-footer-actions {
+  border-color: var(--line);
+}
+
+.project-home .project-lens-thumbs {
+  scrollbar-color: #b7cbc1 transparent;
+}
+
+.project-home .project-lens-thumb-item {
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.project-home .project-lens-thumb-item:hover {
+  border-color: #83ab99;
+  box-shadow: 0 3px 10px rgba(27, 55, 48, .08);
+}
+
+.project-home .project-lens-thumb-item.is-active {
+  background: var(--green-soft);
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green);
+}
+
+.project-home .project-lens-thumb-title {
+  color: #345047;
+}
+
+/* Override the gallery's embedded dark-theme colors in both view modes. */
+.home-lens-card .ant-btn-primary:not(:disabled) {
+  background: var(--green) !important;
+  border-color: var(--green) !important;
+}
+
+.home-lens-card .ant-btn-primary:not(:disabled):hover {
+  background: var(--green-dark) !important;
+  border-color: var(--green-dark) !important;
+}
+
+.home-lens-card .ant-btn-text,
+.home-lens-card .ant-btn-link {
+  color: var(--green) !important;
+}
+
+.home-lens-card .ant-btn:disabled {
+  color: #9ba7a2 !important;
+}
+
+.home-lens-card .project-list-item {
+  color: var(--ink) !important;
+  background: #fbfcfb !important;
+  border-color: #edf1ef !important;
+}
+
+.home-lens-card .project-list-icon {
+  color: #5b8878 !important;
+  background: #eaf4ef !important;
+}
+
+.home-lens-card .project-list-main strong {
+  color: #345047 !important;
+}
+
+.home-lens-card .project-list-main span {
+  color: var(--muted) !important;
+}
