@@ -1417,9 +1417,7 @@ export function CanvasViewer({
               onPointerDown={handleLensPointerDown}
               aria-label={`${lensFixed ? '固定' : '跟随鼠标'}透镜，内部${layerLabel(renderedLensRoles.inner)}`}
             >
-              <span className="lens-window-label">内部 · {layerLabel(renderedLensRoles.inner)}</span>
             </motion.div>
-            <motion.div className="lens-label lens-label-outer" initial={{opacity: 0, y: -3}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -3}} transition={{duration: reducedMotion ? 0 : .15}}>外部 · {layerLabel(renderedLensRoles.outer)}</motion.div>
           </>
         )}
       </AnimatePresence>
@@ -1428,7 +1426,7 @@ export function CanvasViewer({
           <strong>正在切换至{layerLabel(switchingTarget)}…</strong>
           <span className="coverage-detail">{transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress) : '图像已就绪，正在显示'}</span>
           {tileRetryingRef.current[switchingTarget] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
-        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : ''}
+        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '' : gridSampled && showGrid ? '当前数据已抽稀显示' : ''}
         {switchingTarget && <span className={`coverage-progress${transitionPending ? '' : ' is-ready'}${reducedMotion ? ' is-reduced-motion' : ''}`} role="progressbar" aria-label={`${layerLabel(switchingTarget)}切换进度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={transitionPending ? undefined : 100} aria-valuetext={transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress) : '图像已就绪'}><span /></span>}
       </div>
     </div>
