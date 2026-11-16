@@ -21,6 +21,31 @@
   left: 0;
 }
 
+.canvas-shell .canvas-legend {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+}
+
+.canvas-legend .canvas-legend-glass {
+  color-scheme: dark;
+  color: #e0ebe5;
+}
+
+.canvas-legend-glass > .glass-surface__content {
+  gap: 14px;
+  padding: 10px 13px;
+}
+
+.canvas-legend .legend-item {
+  gap: 7px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .65);
+}
+
 /* Point-state legends apply only when individual spots are readable. */
 .canvas-shell:has(.canvas-wrap:not([data-grid-detail="spots"])) .canvas-legend {
   display: none;

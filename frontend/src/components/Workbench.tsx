@@ -1,3 +1,4 @@
+import GlassSurface from './GlassSurface';
 import React, {useEffect, useRef, useState} from 'react';
 import {AnimatePresence, LayoutGroup, motion} from 'motion/react';
 import {
@@ -791,8 +792,23 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                 <ToolButton icon={<HomeOutlined />} label="恢复已保存视野" onClick={restoreSavedView} disabled={!hasSavedView} shortcut="R" />
               </motion.div>
               {((showPits && maldiAvailable) || (showGrid && gridPoints.length > 0)) && <div className="canvas-legend">
-                {showPits && maldiAvailable && <span><i className="legend-line legend-confirmed" />已确认</span>}
-                {showGrid && gridPoints.length > 0 && <span><i className="legend-line legend-candidate" />网格候选</span>}
+                <GlassSurface
+                  width="max-content"
+                  height="auto"
+                  borderRadius={12}
+                  borderWidth={0.07}
+                  brightness={50}
+                  opacity={0.93}
+                  blur={11}
+                  displace={0.5}
+                  backgroundOpacity={0.12}
+                  saturation={1}
+                  distortionScale={-120}
+                  className="canvas-legend-glass"
+                >
+                  {showPits && maldiAvailable && <span className="legend-item"><i className="legend-line legend-confirmed" />已确认</span>}
+                  {showGrid && gridPoints.length > 0 && <span className="legend-item"><i className="legend-line legend-candidate" />网格候选</span>}
+                </GlassSurface>
               </div>}
               <div className="canvas-statusbar">
                 <span className="scale-readout">{reliableScale && scaleDistance > 0 && <i className="scale-line" style={{width: `${scaleBarWidth}px`}} />}{scaleText}</span>
