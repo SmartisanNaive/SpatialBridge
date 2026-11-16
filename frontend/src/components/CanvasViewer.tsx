@@ -3,6 +3,8 @@ import OpenSeadragon, {Viewer as OSDViewer} from 'openseadragon';
 import {AnimatePresence, motion} from 'motion/react';
 import {SwapOutlined} from '@ant-design/icons';
 import {PointerGesture} from '../pointerGesture';
+import {gridLineOpacity, selectGridDetail, SPOT_INTERACTIVE_PX, type GridDetail} from '../gridDetail';
+import './CanvasViewer.css';
 import type {
   Report,
   Viewport,
@@ -123,6 +125,10 @@ export function CanvasViewer({
   const pitOverlaySync = useRef<(() => void) | null>(null);
   const outerFrameCache = useRef<{source: GridPoint[]; points: FramePoint[]} | null>(null);
   const gridSpatialIndex = useRef<GridSpatialIndex | null>(null);
+  const [gridDetail, setGridDetail] = useState<GridDetail>('overview');
+  const gridDetailRef = useRef<GridDetail>('overview');
+  const cellScreenSideRef = useRef(0);
+  const heatmapOverviewCache = useRef<{source: GridPoint[]; colors: HeatmapColors; report: Report; image: HTMLCanvasElement} | null>(null);
   const focusPulseRef = useRef<{x: number; y: number; startedAt: number} | null>(null);
   const focusPendingRef = useRef(false);
   const lensDraggingRef = useRef(false);
@@ -486,9 +492,7 @@ export function CanvasViewer({
       };
       const screenVectorX = vectorToScreen(imageVectorX);
       const screenVectorY = vectorToScreen(imageVectorY);
-      const boxVectorX = {x: screenVectorX.x / 2, y: screenVectorX.y / 2};
-      const boxVectorY = {x: screenVectorY.x / 2, y: screenVectorY.y / 2};
-      const viewportBounds = instance.viewport.getBounds();
+      const viewportBounds = instance.viewport.getBounds(true);
       const viewportTopLeft = instance.viewport.viewportToImageCoordinates(
         new OpenSeadragon.Point(viewportBounds.x, viewportBounds.y),
       );
@@ -505,25 +509,72 @@ export function CanvasViewer({
         Math.hypot(screenVectorX.x, screenVectorX.y),
         Math.hypot(screenVectorY.x, screenVectorY.y),
       );
-      const imageViewTopLeft = imageToScreen(imageLeft, imageTop);
-      const imageViewBottomRight = imageToScreen(imageRight, imageBottom);
-      const visibleScreenArea = Math.max(1,
-        Math.abs(imageViewBottomRight.x - imageViewTopLeft.x) * Math.abs(imageViewBottomRight.y - imageViewTopLeft.y));
-      const wholeBoardView = (imageRight - imageLeft) >= pre.width * .80;
-      // At whole-board scale the individual 20 μm cells are sub-pixel or
-      // nearly so.  Drawing them creates a dense, expensive texture without
-      // adding useful information; keep the actual MALDI footprint outline
-      // as the navigation cue and restore cells once the user zooms in.
-      const frameOnly = wholeBoardView || screenBoxSpan < 5;
-      // Keep mid/far-view rendering bounded by one shared screen-cell budget.
-      // The previous two-state budget could draw both a candidate and a
-      // confirmed box in the same screen cell, doubling the work exactly at
-      // the zoom level where the user is navigating the whole acquisition.
-      const gridRenderBudget = screenBoxSpan < 18 ? 5000 : 9000;
-      const cellSize = Math.max(
-        screenBoxSpan < 10 ? 2.5 : 1.6,
-        Math.sqrt(visibleScreenArea / gridRenderBudget),
+      // Use the shorter cell side so a narrow or rotated cell must also be
+      // readable. Hysteresis keeps tiny zoom changes from flickering layers.
+      const screenCellSide = Math.min(
+        Math.hypot(screenVectorX.x, screenVectorX.y),
+        Math.hypot(screenVectorY.x, screenVectorY.y),
       );
+      cellScreenSideRef.current = screenCellSide;
+      const detail = selectGridDetail(screenCellSide, gridDetailRef.current);
+      if (detail !== gridDetailRef.current) {
+        gridDetailRef.current = detail;
+        setGridDetail(detail);
+      }
+      const imageFootprint = (pit: GridPoint): FramePoint[] => {
+        if (hasWorldFootprint && spotWorldSize && pit.world_x != null && pit.world_y != null) {
+          const halfX = spotWorldSize[0] / 2;
+          const halfY = spotWorldSize[1] / 2;
+          const corners = [
+            worldPointToImage(pit.world_x - halfX, pit.world_y - halfY),
+            worldPointToImage(pit.world_x + halfX, pit.world_y - halfY),
+            worldPointToImage(pit.world_x + halfX, pit.world_y + halfY),
+            worldPointToImage(pit.world_x - halfX, pit.world_y + halfY),
+          ];
+          if (corners.every((corner): corner is FramePoint => corner !== null)) return corners;
+        }
+        return [
+          {x: pit.x - imageVectorX[0] / 2 - imageVectorY[0] / 2, y: pit.y - imageVectorX[1] / 2 - imageVectorY[1] / 2},
+          {x: pit.x + imageVectorX[0] / 2 - imageVectorY[0] / 2, y: pit.y + imageVectorX[1] / 2 - imageVectorY[1] / 2},
+          {x: pit.x + imageVectorX[0] / 2 + imageVectorY[0] / 2, y: pit.y + imageVectorX[1] / 2 + imageVectorY[1] / 2},
+          {x: pit.x - imageVectorX[0] / 2 + imageVectorY[0] / 2, y: pit.y - imageVectorX[1] / 2 + imageVectorY[1] / 2},
+        ];
+      };
+      const drawHeatmapOverview = () => {
+        const source = gridPointsRef.current;
+        let cached = heatmapOverviewCache.current;
+        if (!cached || cached.source !== source || cached.colors !== colors || cached.report !== report) {
+          // Rasterize every coloured footprint once. Browser image filtering
+          // preserves the overall colour field without sparse substitute dots.
+          const image = document.createElement('canvas');
+          const scale = Math.min(1, 4096 / Math.max(pre.width, pre.height));
+          image.width = Math.max(1, Math.round(pre.width * scale));
+          image.height = Math.max(1, Math.round(pre.height * scale));
+          const bitmap = image.getContext('2d');
+          if (!bitmap) return;
+          bitmap.setTransform(image.width / pre.width, 0, 0, image.height / pre.height, 0, 0);
+          for (const pit of source) {
+            const color = colors.get(pit.spot_id);
+            if (!color || !Number.isFinite(pit.x) || !Number.isFinite(pit.y)) continue;
+            const corners = imageFootprint(pit);
+            bitmap.beginPath();
+            bitmap.moveTo(corners[0].x, corners[0].y);
+            for (const corner of corners.slice(1)) bitmap.lineTo(corner.x, corner.y);
+            bitmap.closePath();
+            bitmap.fillStyle = color;
+            bitmap.fill();
+          }
+          cached = {source, colors, report, image};
+          heatmapOverviewCache.current = cached;
+        }
+        context.save();
+        context.transform(screenUnitX.x, screenUnitX.y, screenUnitY.x, screenUnitY.y,
+                          imageOrigin.x + offsetX, imageOrigin.y + offsetY);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.drawImage(cached.image, 0, 0, pre.width, pre.height);
+        context.restore();
+      };
       const buildOuterFrame = () => {
         const source = gridPointsRef.current;
         if (outerFrameCache.current?.source === source) return outerFrameCache.current.points;
@@ -609,13 +660,13 @@ export function CanvasViewer({
             if (bucket) visibleIndices.push(...bucket);
           }
         }
-        // Keep at most one box per screen cell. If a candidate and a
-        // confirmed node compete for the same cell, retain the confirmed one
-        // so the coarse view still communicates optical evidence.
-        const selected = new Map<string, GridPoint>();
+        // Once cells are readable, draw every visible footprint; dropping
+        // nodes to meet a screen budget makes the grid appear incomplete.
+        const selected: GridPoint[] = [];
         for (const index of visibleIndices) {
           const pit = source[index];
-          if (heatmap ? !colors.has(pit.spot_id) : (pit.detected ? !drawPits : !drawGrid)) continue;
+          if (heatmap ? !colors.has(pit.spot_id) :
+              detail === 'grid' ? !drawGrid : (pit.detected ? !drawPits : !drawGrid)) continue;
           if (!Number.isFinite(pit.x) || !Number.isFinite(pit.y)) continue;
           if (pit.x < imageLeft - boxMarginX || pit.x > imageRight + boxMarginX ||
               pit.y < imageTop - boxMarginY || pit.y > imageBottom + boxMarginY) continue;
@@ -623,51 +674,12 @@ export function CanvasViewer({
           const x = centre.x;
           const y = centre.y;
           if (x < -screenBoxSpan || y < -screenBoxSpan || x > width + screenBoxSpan || y > height + screenBoxSpan) continue;
-          const cell = `${Math.floor(x / cellSize)}:${Math.floor(y / cellSize)}`;
-          const previous = selected.get(cell);
-          if (!previous || (!heatmap && !previous.detected && pit.detected)) selected.set(cell, pit);
+          selected.push(pit);
         }
         const paths: [Path2D, Path2D] = [new Path2D(), new Path2D()];
-        for (const pit of selected.values()) {
-          const centre = imagePointToScreen(pit);
-          const x = centre.x;
-          const y = centre.y;
-          const state = pit.detected ? 1 : 0;
-          if (heatmap && screenBoxSpan < 3) {
-            context.fillStyle = colors.get(pit.spot_id)!;
-            context.fillRect(x - 1.5, y - 1.5, 3, 3);
-            continue;
-          }
-          let screenCorners: Array<{x: number; y: number}> = [];
-          const worldX = pit.world_x;
-          const worldY = pit.world_y;
-          const mappedWorldCentre = hasWorldFootprint && worldX != null && worldY != null
-            ? worldPointToImage(worldX, worldY)
-            : null;
-          if (mappedWorldCentre && spotWorldSize && hasWorldFootprint) {
-            const halfX = spotWorldSize[0] / 2;
-            const halfY = spotWorldSize[1] / 2;
-            const imageCorners = [
-              worldPointToImage(worldX! - halfX, worldY! - halfY),
-              worldPointToImage(worldX! + halfX, worldY! - halfY),
-              worldPointToImage(worldX! + halfX, worldY! + halfY),
-              worldPointToImage(worldX! - halfX, worldY! + halfY),
-            ];
-            if (imageCorners.every((corner): corner is {x: number; y: number} => corner != null)) {
-              // Both candidate and confirmed nodes use the same theoretical
-              // SBD grid centre.  The response maximum is diagnostic only;
-              // translating a footprint to it would scatter the tiled grid.
-              screenCorners = imageCorners.map((corner) => imagePointToScreen(corner));
-            }
-          }
-          if (!screenCorners.length) {
-            screenCorners = [
-              {x: x - boxVectorX.x - boxVectorY.x, y: y - boxVectorX.y - boxVectorY.y},
-              {x: x + boxVectorX.x - boxVectorY.x, y: y + boxVectorX.y - boxVectorY.y},
-              {x: x + boxVectorX.x + boxVectorY.x, y: y + boxVectorX.y + boxVectorY.y},
-              {x: x - boxVectorX.x + boxVectorY.x, y: y - boxVectorX.y + boxVectorY.y},
-            ];
-          }
+        for (const pit of selected) {
+          const state = detail === 'spots' && pit.detected ? 1 : 0;
+          const screenCorners = imageFootprint(pit).map(imagePointToScreen);
           const path = heatmap ? new Path2D() : paths[state];
           path.moveTo(screenCorners[0].x, screenCorners[0].y);
           for (const corner of screenCorners.slice(1)) path.lineTo(corner.x, corner.y);
@@ -696,13 +708,17 @@ export function CanvasViewer({
       context.clip();
       if (drawHeatmap && colors.size) {
         context.globalAlpha = Math.max(0, Math.min(100, colorOpacity)) / 100;
-        drawGridPoints(true);
+        if (detail === 'spots') drawGridPoints(true);
+        else drawHeatmapOverview();
       }
       context.globalAlpha = Math.max(0, Math.min(100, drawOpacity)) / 100;
-      if (frameOnly && drawGrid) drawOuterFrame();
-      else if (!frameOnly) drawGridPoints();
+      if (drawGrid || drawPits) drawOuterFrame();
+      if (detail !== 'overview') {
+        if (detail === 'grid') context.globalAlpha *= gridLineOpacity(screenCellSide);
+        drawGridPoints();
+      }
       const selected = selectedSpotRef.current;
-      if (selected && Number.isFinite(selected.pre_x) && Number.isFinite(selected.pre_y)) {
+      if (detail === 'spots' && selected && Number.isFinite(selected.pre_x) && Number.isFinite(selected.pre_y)) {
         const marker = imagePointToScreen({x: selected.pre_x, y: selected.pre_y});
         context.globalAlpha = 1;
         context.beginPath();
@@ -1181,6 +1197,16 @@ export function CanvasViewer({
       onAnnotationPlaceRef.current?.({x: imagePoint.x, y: imagePoint.y});
       return;
     }
+    if (gridPointsRef.current.length && gridDetailRef.current !== 'spots') {
+      // A small footprint is not a reliable click target. Use overview clicks
+      // to move into the readable scale instead of selecting an invisible node.
+      const side = cellScreenSideRef.current;
+      if (Number.isFinite(side) && side > 0) {
+        const factor = Math.max(1.5, (SPOT_INTERACTIVE_PX + 1) / side);
+        instance.viewport.zoomTo(instance.viewport.getZoom() * factor, viewportPoint, false);
+      }
+      return;
+    }
     onSpotSelectRef.current({x: imagePoint.x, y: imagePoint.y, layer});
   };
   const handleLensPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1288,6 +1314,7 @@ export function CanvasViewer({
   return (
     <div
       className={`canvas-wrap${annotationMode && layer === 'after' ? ' viewer-annotation-mode' : ''}`}
+      data-grid-detail={gridDetail}
       onPointerDownCapture={handleCanvasPointerDown}
       onPointerMoveCapture={handleCanvasPointerMove}
       onPointerUpCapture={handleCanvasPointerUp}
@@ -1342,7 +1369,7 @@ export function CanvasViewer({
           <strong>正在切换至{layerLabel(transitionPending)}…</strong>
           <span className="coverage-detail">{preparingText(layerLabel(transitionPending), loadProgress)}</span>
           {tileRetryingRef.current[transitionPending] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
-        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridSampled && showGrid ? '当前缩放下已抽稀显示，放大可查看完整点位' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
+        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '网格预览 · 继续放大可查询单点' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
         {transitionPending && <span className="coverage-progress" aria-hidden="true"><span /></span>}
       </div>
     </div>

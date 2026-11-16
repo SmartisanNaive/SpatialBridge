@@ -1,0 +1,4 @@
+/* Point-state legends apply only when individual spots are readable. */
+.canvas-shell:has(.canvas-wrap:not([data-grid-detail="spots"])) .canvas-legend {
+  display: none;
+}
