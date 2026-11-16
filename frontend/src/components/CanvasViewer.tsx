@@ -4,6 +4,7 @@ import {AnimatePresence, motion} from 'motion/react';
 import {SwapOutlined} from '@ant-design/icons';
 import {PointerGesture} from '../pointerGesture';
 import {gridLineOpacity, selectGridDetail, SPOT_INTERACTIVE_PX, type GridDetail} from '../gridDetail';
+import {groupGridPoints} from '../gridGroups';
 import './CanvasViewer.css';
 import type {
   Report,
@@ -129,6 +130,8 @@ export function CanvasViewer({
   const gridDetailRef = useRef<GridDetail>('overview');
   const cellScreenSideRef = useRef(0);
   const heatmapOverviewCache = useRef<{source: GridPoint[]; colors: HeatmapColors; report: Report; image: HTMLCanvasElement} | null>(null);
+  const footprintCache = useRef<{report: Report; points: WeakMap<GridPoint, FramePoint[]>} | null>(null);
+  const groupedGridCache = useRef<{source: GridPoint[]; report: Report; groups: {corners: FramePoint[]; left: number; right: number; top: number; bottom: number}[]} | null>(null);
   const focusPulseRef = useRef<{x: number; y: number; startedAt: number} | null>(null);
   const focusPendingRef = useRef(false);
   const lensDraggingRef = useRef(false);
@@ -521,7 +524,10 @@ export function CanvasViewer({
         gridDetailRef.current = detail;
         setGridDetail(detail);
       }
-      const imageFootprint = (pit: GridPoint): FramePoint[] => {
+      if (footprintCache.current?.report !== report) {
+        footprintCache.current = {report, points: new WeakMap()};
+      }
+      const computeFootprint = (pit: GridPoint): FramePoint[] => {
         if (hasWorldFootprint && spotWorldSize && pit.world_x != null && pit.world_y != null) {
           const halfX = spotWorldSize[0] / 2;
           const halfY = spotWorldSize[1] / 2;
@@ -539,6 +545,41 @@ export function CanvasViewer({
           {x: pit.x + imageVectorX[0] / 2 + imageVectorY[0] / 2, y: pit.y + imageVectorX[1] / 2 + imageVectorY[1] / 2},
           {x: pit.x - imageVectorX[0] / 2 + imageVectorY[0] / 2, y: pit.y - imageVectorX[1] / 2 + imageVectorY[1] / 2},
         ];
+      };
+      const imageFootprint = (pit: GridPoint): FramePoint[] => {
+        const cache = footprintCache.current!.points;
+        let corners = cache.get(pit);
+        if (!corners) {
+          corners = computeFootprint(pit);
+          cache.set(pit, corners);
+        }
+        return corners;
+      };
+      const drawGroupedGrid = () => {
+        if (!drawGrid) return;
+        const source = gridPointsRef.current;
+        let cached = groupedGridCache.current;
+        if (!cached || cached.source !== source || cached.report !== report) {
+          const groups = groupGridPoints(source).map((group) => {
+            const corners = convexHull(group.flatMap(imageFootprint));
+            return {corners, left: Math.min(...corners.map(p => p.x)), right: Math.max(...corners.map(p => p.x)),
+              top: Math.min(...corners.map(p => p.y)), bottom: Math.max(...corners.map(p => p.y))};
+          });
+          cached = {source, report, groups};
+          groupedGridCache.current = cached;
+        }
+        const path = new Path2D();
+        for (const group of cached.groups) {
+          if (group.right < imageLeft || group.left > imageRight || group.bottom < imageTop || group.top > imageBottom) continue;
+          const corners = group.corners.map(imagePointToScreen);
+          if (!corners.length) continue;
+          path.moveTo(corners[0].x, corners[0].y);
+          for (let i = 1; i < corners.length; i++) path.lineTo(corners[i].x, corners[i].y);
+          path.closePath();
+        }
+        context.lineWidth = 1;
+        context.strokeStyle = 'rgba(194, 205, 205, .48)';
+        context.stroke(path);
       };
       const drawHeatmapOverview = () => {
         const source = gridPointsRef.current;
@@ -713,8 +754,10 @@ export function CanvasViewer({
       }
       context.globalAlpha = Math.max(0, Math.min(100, drawOpacity)) / 100;
       if (drawGrid || drawPits) drawOuterFrame();
-      if (detail !== 'overview') {
-        if (detail === 'grid') context.globalAlpha *= gridLineOpacity(screenCellSide);
+      if (detail === 'grid') {
+        context.globalAlpha *= gridLineOpacity(screenCellSide);
+        drawGroupedGrid();
+      } else if (detail === 'spots') {
         drawGridPoints();
       }
       const selected = selectedSpotRef.current;
@@ -1369,7 +1412,7 @@ export function CanvasViewer({
           <strong>正在切换至{layerLabel(transitionPending)}…</strong>
           <span className="coverage-detail">{preparingText(layerLabel(transitionPending), loadProgress)}</span>
           {tileRetryingRef.current[transitionPending] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
-        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '网格预览 · 继续放大可查询单点' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
+        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '4×4 区域格 · 每格最多 16 个采样点 · 放大后查询单点' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
         {transitionPending && <span className="coverage-progress" aria-hidden="true"><span /></span>}
       </div>
     </div>
