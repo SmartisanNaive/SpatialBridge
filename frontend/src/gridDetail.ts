@@ -1,5 +1,5 @@
 export type GridDetail = 'overview' | 'grid' | 'spots';
-export type GridGroupSide = 4 | 8 | 16;
+export type GridGroupSide = 2 | 4 | 8 | 16;
 
 // CSS pixels, independent of image dimensions, zoom labels and display density.
 export const GRID_VISIBLE_PX = .5;
@@ -16,7 +16,8 @@ export function selectGridDetail(side: number, previous: GridDetail = 'overview'
 // A 10% dead band prevents repeated density changes near a threshold.
 export function selectGridGroupSide(side: number, previous: GridGroupSide = 16): GridGroupSide {
   if (!Number.isFinite(side) || side <= 0) return 16;
-  if (side >= 4 || (previous === 4 && side >= 3.6)) return 4;
+  if (side >= 8 || (previous === 2 && side >= 7.2)) return 2;
+  if (side >= 4 || (previous <= 4 && side >= 3.6)) return 4;
   if (side >= 2 || (previous !== 16 && side >= 1.8)) return 8;
   return 16;
 }

@@ -62,16 +62,24 @@ test('density follows projected cell size and keeps a dead band in both directio
   assert.equal(selectGridGroupSide(3.8, 4), 4);
   assert.equal(selectGridGroupSide(3.59, 4), 8);
   assert.equal(selectGridGroupSide(1, 4), 16);
-  assert.equal(selectGridGroupSide(8, 16), 4);
+  assert.equal(selectGridGroupSide(8, 16), 2);
+  assert.equal(selectGridGroupSide(7.5, 2), 2);
+  assert.equal(selectGridGroupSide(7.19, 2), 4);
+  assert.equal(selectGridGroupSide(3.8, 2), 4);
+  assert.equal(selectGridGroupSide(1.9, 2), 8);
+  assert.equal(selectGridGroupSide(1, 2), 16);
+  assert.equal(selectGridDetail(10), 'grid');
+  assert.equal(selectGridGroupSide(10), 2);
+  assert.equal(selectGridDetail(12), 'spots');
   assert.equal(selectGridGroupSide(NaN, 4), 16);
 });
 
 test('coarser levels nest complete smaller groups and reduce their count', () => {
   const points = Array.from({length: 1024}, (_, i) => ({spot_id: i, raster: 0,
     x: i, y: i, original_x: i % 32 - 16, original_y: Math.floor(i / 32) - 16, detected: true}));
-  const levels = [4, 8, 16] as const;
+  const levels = [2, 4, 8, 16] as const;
   const groups = levels.map(side => groupGridPoints(points, side));
-  assert.deepEqual(groups.map(g => g.length), [64, 16, 4]);
+  assert.deepEqual(groups.map(g => g.length), [256, 64, 16, 4]);
   groups.forEach((level, index) => {
     assert.ok(level.every(group => group.length === levels[index] ** 2));
     assert.equal(new Set(level.flat()).size, points.length);
