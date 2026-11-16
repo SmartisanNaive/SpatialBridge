@@ -1,4 +1,5 @@
 import GlassSurface from './GlassSurface';
+import './Workbench.css';
 import React, {useEffect, useRef, useState} from 'react';
 import {AnimatePresence, LayoutGroup, motion} from 'motion/react';
 import {

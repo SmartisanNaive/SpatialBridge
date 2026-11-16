@@ -1,0 +1,14 @@
+.header-observation .mode-operations-lens {
+  width: max-content;
+  flex: 0 0 auto;
+}
+
+.mode-operations-lens .mode-operations-panel {
+  width: max-content;
+  gap: 12px;
+  padding-inline: 8px;
+}
+
+.mode-operations-lens .mode-role-pair {
+  flex: 0 0 auto;
+}
