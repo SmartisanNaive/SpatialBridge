@@ -3,7 +3,7 @@ import OpenSeadragon, {Viewer as OSDViewer} from 'openseadragon';
 import {AnimatePresence, motion} from 'motion/react';
 import {SwapOutlined} from '@ant-design/icons';
 import {PointerGesture} from '../pointerGesture';
-import {gridLineOpacity, selectGridDetail, SPOT_INTERACTIVE_PX, type GridDetail} from '../gridDetail';
+import {gridLineOpacity, selectGridDetail, selectGridGroupSide, SPOT_INTERACTIVE_PX, type GridDetail, type GridGroupSide} from '../gridDetail';
 import {groupGridPoints} from '../gridGroups';
 import './CanvasViewer.css';
 import type {
@@ -131,7 +131,8 @@ export function CanvasViewer({
   const cellScreenSideRef = useRef(0);
   const heatmapOverviewCache = useRef<{source: GridPoint[]; colors: HeatmapColors; report: Report; image: HTMLCanvasElement} | null>(null);
   const footprintCache = useRef<{report: Report; points: WeakMap<GridPoint, FramePoint[]>} | null>(null);
-  const groupedGridCache = useRef<{source: GridPoint[]; report: Report; groups: {corners: FramePoint[]; left: number; right: number; top: number; bottom: number}[]} | null>(null);
+  const groupSideRef = useRef<GridGroupSide>(16);
+  const groupedGridCache = useRef(new Map<GridGroupSide, {source: GridPoint[]; report: Report; groups: {corners: FramePoint[]; left: number; right: number; top: number; bottom: number}[]}>());
   const focusPulseRef = useRef<{x: number; y: number; startedAt: number} | null>(null);
   const focusPendingRef = useRef(false);
   const lensDraggingRef = useRef(false);
@@ -520,6 +521,9 @@ export function CanvasViewer({
       );
       cellScreenSideRef.current = screenCellSide;
       const detail = selectGridDetail(screenCellSide, gridDetailRef.current);
+      const groupSide = selectGridGroupSide(screenCellSide, groupSideRef.current);
+      groupSideRef.current = groupSide;
+      if (element.current) element.current.dataset.gridGroupSide = detail === 'grid' ? String(groupSide) : detail === 'spots' ? '1' : '0';
       if (detail !== gridDetailRef.current) {
         gridDetailRef.current = detail;
         setGridDetail(detail);
@@ -558,15 +562,19 @@ export function CanvasViewer({
       const drawGroupedGrid = () => {
         if (!drawGrid) return;
         const source = gridPointsRef.current;
-        let cached = groupedGridCache.current;
-        if (!cached || cached.source !== source || cached.report !== report) {
-          const groups = groupGridPoints(source).map((group) => {
+        const previousCache = groupedGridCache.current.values().next().value;
+        if (previousCache && (previousCache.source !== source || previousCache.report !== report)) {
+          groupedGridCache.current.clear();
+        }
+        let cached = groupedGridCache.current.get(groupSide);
+        if (!cached) {
+          const groups = groupGridPoints(source, groupSide).map((group) => {
             const corners = convexHull(group.flatMap(imageFootprint));
             return {corners, left: Math.min(...corners.map(p => p.x)), right: Math.max(...corners.map(p => p.x)),
               top: Math.min(...corners.map(p => p.y)), bottom: Math.max(...corners.map(p => p.y))};
           });
           cached = {source, report, groups};
-          groupedGridCache.current = cached;
+          groupedGridCache.current.set(groupSide, cached);
         }
         const path = new Path2D();
         for (const group of cached.groups) {
