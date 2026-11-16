@@ -572,7 +572,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               <Tooltip title={hint} key={value}>
                 <button type="button" role="tab" aria-selected={mode === value} className={mode === value ? 'is-active' : ''} onClick={() => chooseMode(value)}>
                   {mode === value && <motion.span className="tab-selection" layoutId="observation-mode-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
-                  <span className="tab-dot mode-dot" /><span className="tab-label">{label}</span>
+                  <span className="tab-label">{label}</span>
                 </button>
               </Tooltip>
             ))}
@@ -591,7 +591,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                   {(['pre', 'after'] as ViewLayer[]).map((value) => (
                     <button type="button" className={`mode-layer-option${currentLayer === value ? ' is-active' : ''}`} aria-pressed={currentLayer === value} key={value} onClick={() => chooseLayer(value)}>
                       {currentLayer === value && <motion.span className="tab-selection" layoutId="single-layer-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
-                      <span className={`tab-dot ${value === 'pre' ? 'dot-pre' : 'dot-after'}`} /><span className="tab-label">{value === 'pre' ? '采集前' : '采集后'}</span>
+                      <span className="tab-label">{value === 'pre' ? '采集前' : '采集后'}</span>
                     </button>
                   ))}
                 </div>
@@ -599,9 +599,9 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               {mode === 'compare' && (
                 <div className="mode-operations-panel" role="group" aria-label="卷帘图像与操作">
                   <div className="mode-role-pair" aria-label={`左侧${currentLayer === 'pre' ? '采集前' : '采集后'}，右侧${compareLayer === 'pre' ? '采集前' : '采集后'}`}>
-                    <span className="mode-role"><small>左</small><span className={`tab-dot ${currentLayer === 'pre' ? 'dot-pre' : 'dot-after'}`} /><strong>{currentLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                    <span className="mode-role"><small>左</small><strong>{currentLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
                     <span className="mode-role-divider" aria-hidden="true">／</span>
-                    <span className="mode-role"><small>右</small><span className={`tab-dot ${compareLayer === 'pre' ? 'dot-pre' : 'dot-after'}`} /><strong>{compareLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                    <span className="mode-role"><small>右</small><strong>{compareLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
                   </div>
                   <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label="交换左右图像"><SwapOutlined /><span>交换左右</span></button>
                   <button type="button" className="mode-action" onClick={() => setComparePosition(50)} aria-label="复位分界线"><span aria-hidden="true">↔</span><span>复位分界</span></button>
@@ -611,9 +611,9 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               {mode === 'lens' && (
                 <div className="mode-operations-panel" role="group" aria-label="透镜图像与操作">
                   <div className="mode-role-pair" aria-label={`外部${currentLayer === 'pre' ? '采集前' : '采集后'}，内部${lensLayer === 'pre' ? '采集前' : '采集后'}`}>
-                    <span className="mode-role"><small>外</small><span className={`tab-dot ${currentLayer === 'pre' ? 'dot-pre' : 'dot-after'}`} /><strong>{currentLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                    <span className="mode-role"><small>外</small><strong>{currentLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
                     <span className="mode-role-divider" aria-hidden="true">／</span>
-                    <span className="mode-role"><small>内</small><span className={`tab-dot ${lensLayer === 'pre' ? 'dot-pre' : 'dot-after'}`} /><strong>{lensLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                    <span className="mode-role"><small>内</small><strong>{lensLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
                   </div>
                   <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label="交换内外图像"><SwapOutlined /><span>交换内外</span></button>
                 </div>
