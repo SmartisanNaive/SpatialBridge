@@ -623,10 +623,10 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         </LayoutGroup>
         </div>
         <div className="header-actions">
-          <div className={`header-result${mappingSuccess ? ' is-success' : ' is-warning'}`}>
-            {mappingSuccess ? <CheckCircleFilled /> : <SettingOutlined />}
-            <span>{mappingSuccess ? '映射完成' : mapping?.available ? '需复核' : '图像已就绪'}</span>
-          </div>
+          {!mappingSuccess && <div className="header-result is-warning">
+            <SettingOutlined />
+            <span>{mapping?.available ? '需复核' : '图像已就绪'}</span>
+          </div>}
           <Button type="text" icon={<FileSearchOutlined />} onClick={() => setReportOpen(true)}>配准报告</Button>
           <Tooltip title={maldiAvailable ? '导出已确认灼烧坑及对应 normalization 数值' : '当前项目没有可用 MALDI/SBD 数据'}>
             <Button type="text" icon={<DownloadOutlined />} disabled={!maldiAvailable} href={maldiAvailable ? `${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}` : undefined} target="_blank">导出灼烧坑 CSV</Button>
@@ -660,7 +660,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
             <section className="control-section project-summary">
               <div className="section-heading"><span>项目摘要</span><span className="section-meta">只读</span></div>
               <div className="summary-row"><span>来源</span><strong title={projectLabel}>{projectLabel}</strong></div>
-              <div className="summary-row"><span>映射状态</span><strong className={mappingSuccess ? 'summary-success' : 'summary-muted'}>{mappingSuccess ? '已完成，可复核' : mapping?.available ? '需复核' : report?.maldi_data?.available ? 'SBD 已读取，尚未定位' : '无 MALDI 数据'}</strong></div>
+              {!mappingSuccess && <div className="summary-row"><span>映射状态</span><strong className="summary-muted">{mapping?.available ? '需复核' : report?.maldi_data?.available ? 'SBD 已读取，尚未定位' : '无 MALDI 数据'}</strong></div>}
               <div className="summary-row"><span>SBD 采样点</span><strong>{report?.maldi_data?.spot_count?.toLocaleString() ?? '—'}</strong></div>
               <div className="summary-row"><span>已映射点</span><strong>{mapping?.mapped_spot_count?.toLocaleString() ?? '—'}</strong></div>
             </section>
@@ -689,7 +689,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
             </AnimatePresence>
 
             <section className="control-section">
-              <div className="section-heading"><span>叠加与参数</span><span className="section-meta">实时绘制</span></div>
+              <div className="section-heading"><span>叠加与参数</span></div>
               <div className="switch-row"><span><EyeOutlined /> 采样网格</span><Switch size="small" checked={showGrid} onChange={setShowGrid} /></div>
               <div className="switch-row"><span><AimOutlined /> 灼烧坑标记 <em>{autoPitTotal.toLocaleString()}</em></span><Switch size="small" checked={showPits} onChange={setShowPits} disabled={!maldiAvailable} /></div>
               <div className="parameter-block opacity-block"><div className="parameter-label"><span>叠加透明度</span><span className="parameter-value">{overlayOpacity}%</span></div><Slider min={0} max={100} value={overlayOpacity} onChange={setOverlayOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
@@ -699,11 +699,10 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
             </section>
 
             <section className="control-section">
-              <div className="section-heading"><span>MALDI 热图</span><Tooltip title="热图颜色为图像视觉采样值，非实际质谱离子强度，不可用于定量分析。"><span className="section-meta" tabIndex={0}>颜色参考</span></Tooltip></div>
+              <div className="section-heading"><span>MALDI 热图</span></div>
               {heatmapUploading ? <div className="sidebar-empty-note">正在上传并进行空间配准…</div> : heatmapLoading ? <div className="sidebar-empty-note">正在载入热图…</div> : heatmap?.available ? (
                 <div className="sidebar-empty-note">
                   {heatmap.label || heatmap.filename || 'PNG 热图'}
-                  {heatmap.warning && <><br />{heatmap.warning}</>}
                 </div>
               ) : <div className="sidebar-empty-note">{heatmap?.warning || '暂未导入热图，可按需添加。'}</div>}
               {heatmapError && <Alert type="error" showIcon message={heatmapError} />}
@@ -744,7 +743,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
             }]} />
             <div className="sidebar-footer">
               <div><span>减少动态效果</span><Switch size="small" checked={reducedMotion} onChange={setReducedMotion} /></div>
-              <Typography.Text type="secondary">来源文件只读 · 数值缺失显示为 —</Typography.Text>
             </div>
           </div>
         </aside>
@@ -851,7 +849,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         <motion.div className="report-drawer-content" initial={{opacity: 0, x: 12}} animate={{opacity: 1, x: 0}} transition={{duration: reducedMotion ? 0 : .2}}>
         <div className="report-summary">
           <div className={`report-summary-icon${mappingSuccess ? ' is-success' : ' is-warning'}`}>{mappingSuccess ? <CheckCircleFilled /> : <SettingOutlined />}</div>
-          <div><strong>{mappingSuccess ? '映射完成 · 可复核' : '结果需复核'}</strong><span>{mapping?.quality ?? '前后显微图区域级对齐'}</span></div>
+          <div>{!mappingSuccess && <strong>结果需复核</strong>}<span>{mapping?.quality ?? '前后显微图区域级对齐'}</span></div>
         </div>
         <div className="report-metrics"><div><strong>{mapping?.mapped_spot_count?.toLocaleString() ?? '—'}</strong><span>映射点</span></div><div><strong>{autoPitTotal.toLocaleString()}</strong><span>已确认灼烧坑</span></div><div><strong>{Number.isFinite(opticalP95) ? `${opticalP95!.toFixed(2)} px` : '—'}</strong><span>光学验证误差 p95</span></div></div>
         <Collapse className="report-collapse" ghost items={[

@@ -1412,7 +1412,7 @@ export function CanvasViewer({
           <strong>正在切换至{layerLabel(transitionPending)}…</strong>
           <span className="coverage-detail">{preparingText(layerLabel(transitionPending), loadProgress)}</span>
           {tileRetryingRef.current[transitionPending] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
-        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '4×4 区域格 · 每格最多 16 个采样点 · 放大后查询单点' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
+        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
         {transitionPending && <span className="coverage-progress" aria-hidden="true"><span /></span>}
       </div>
     </div>
