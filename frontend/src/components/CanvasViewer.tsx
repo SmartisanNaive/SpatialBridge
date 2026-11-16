@@ -147,6 +147,7 @@ export function CanvasViewer({
   const tileRetryingRef = useRef<Record<ViewLayer, boolean>>({pre: false, after: false});
   const tilesLoadedRef = useRef<Record<ViewLayer, number>>({pre: 0, after: 0});
   const lensTransitionRequestRef = useRef(0);
+  const previousLensModeRef = useRef(lens);
   const lensTransitionRef = useRef<LensTransition | null>(null);
   const lensTransitionFrameRef = useRef<number | null>(null);
   const initialLensRoles: LensRoles = {outer: layer, inner: layer === 'pre' ? 'after' : 'pre'};
@@ -1116,8 +1117,12 @@ export function CanvasViewer({
   }, [compare, layer, lens]);
 
   useEffect(() => {
+    const wasLens = previousLensModeRef.current;
+    previousLensModeRef.current = lens;
     if (!lens) {
-      abortLensTransition(lensRolesForLayer(layer));
+      // Layer changes in single mode must not cancel that mode's tile wait.
+      if (wasLens) abortLensTransition(lensRolesForLayer(layer));
+      else commitLensRoles(lensRolesForLayer(layer));
       return;
     }
     requestLensTransition(lensRolesForLayer(layer));
@@ -1362,8 +1367,10 @@ export function CanvasViewer({
       </motion.div>
     );
   };
+  const switchingTarget = transitionPending ?? (isSingle ? singleTransition?.to : null);
   return (
     <div
+      aria-busy={Boolean(switchingTarget)}
       className={`canvas-wrap${annotationMode && layer === 'after' ? ' viewer-annotation-mode' : ''}`}
       data-grid-detail={gridDetail}
       onPointerDownCapture={handleCanvasPointerDown}
@@ -1415,13 +1422,13 @@ export function CanvasViewer({
           </>
         )}
       </AnimatePresence>
-      <div className={`coverage ${tileError && !transitionPending ? 'coverage-error' : ''}${transitionPending ? ' coverage-preparing' : ''}`} role="status" aria-live="polite" aria-atomic="true">
-        {transitionPending ? <>
-          <strong>正在切换至{layerLabel(transitionPending)}…</strong>
-          <span className="coverage-detail">{preparingText(layerLabel(transitionPending), loadProgress)}</span>
-          {tileRetryingRef.current[transitionPending] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
-        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : '前后图像对齐'}
-        {transitionPending && <span className="coverage-progress" aria-hidden="true"><span /></span>}
+      <div className={`coverage ${tileError && !switchingTarget ? 'coverage-error' : ''}${switchingTarget ? ' coverage-preparing' : ''}`} role="status" aria-live="polite" aria-atomic="true">
+        {switchingTarget ? <>
+          <strong>正在切换至{layerLabel(switchingTarget)}…</strong>
+          <span className="coverage-detail">{transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress) : '图像已就绪，正在显示'}</span>
+          {tileRetryingRef.current[switchingTarget] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
+        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '' : gridSampled && showGrid ? '当前数据已抽稀显示' : compare ? '双图卷帘对比' : lens ? '局部透镜对比' : ''}
+        {switchingTarget && <span className={`coverage-progress${transitionPending ? '' : ' is-ready'}${reducedMotion ? ' is-reduced-motion' : ''}`} role="progressbar" aria-label={`${layerLabel(switchingTarget)}切换进度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={transitionPending ? undefined : 100} aria-valuetext={transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress) : '图像已就绪'}><span /></span>}
       </div>
     </div>
   );
@@ -1429,7 +1436,7 @@ export function CanvasViewer({
 
 function preparingText(label: string, progress: {loaded: number; seconds: number; slow: boolean} | null) {
   const base = `正在准备${label}当前视野`;
-  if (!progress || progress.seconds < 1) return `${base}，就绪后自动显示`;
-  const detail = progress.loaded > 0 ? `本次新增载入 ${progress.loaded} 块 · 已等待 ${progress.seconds}s` : `已等待 ${progress.seconds}s`;
+  if (!progress) return `${base}…`;
+  const detail = `已新增载入 ${progress.loaded} 块切片 · 已等待 ${progress.seconds}s`;
   return progress.slow ? `加载耗时较长，仍在处理中 · ${detail}` : detail;
 }

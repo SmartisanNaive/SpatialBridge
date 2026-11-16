@@ -2,6 +2,25 @@
   display: none;
 }
 
+.canvas-wrap .coverage-progress {
+  height: 6px;
+}
+
+.canvas-wrap .coverage-progress.is-ready span {
+  width: 100%;
+  animation: none;
+  transform: none;
+}
+
+.canvas-wrap .coverage-progress.is-reduced-motion span {
+  animation: none;
+  left: 32%;
+}
+
+.canvas-wrap .coverage-progress.is-ready.is-reduced-motion span {
+  left: 0;
+}
+
 /* Point-state legends apply only when individual spots are readable. */
 .canvas-shell:has(.canvas-wrap:not([data-grid-detail="spots"])) .canvas-legend {
   display: none;
