@@ -3,7 +3,9 @@ import HistoryProjects from './HistoryProjects';
 import {useEffect, useRef, useState} from 'react';
 import {Alert, Button, Card, Input, Layout, Progress, Space, Typography} from 'antd';
 import {
-  CheckCircleOutlined,
+  SafetyOutlined,
+  AimOutlined,
+  HistoryOutlined,
   PauseOutlined,
   PlayCircleOutlined,
   UploadOutlined,
@@ -409,7 +411,7 @@ export function ProjectHome({
               {demoAvailable && <Button onClick={onDemo} disabled={busy || uploading}>载入内置示例</Button>}
             </Space>
             {(error || uploadError) && <Alert type="error" showIcon message="项目请求失败" description={error || uploadError} />}
-            <div className="home-notes"><span><CheckCircleOutlined />来源文件只读</span><span><CheckCircleOutlined />自动建立空间坐标</span><span><CheckCircleOutlined />支持断点续传</span></div>
+            <div className="home-notes"><span><SafetyOutlined />来源文件只读</span><span><AimOutlined />自动建立空间坐标</span><span><HistoryOutlined />支持断点续传</span></div>
           </Card>
           <HistoryProjects projects={projects} onOpen={onOpen} onRetry={onRetry} busy={busy} />
         </div>
