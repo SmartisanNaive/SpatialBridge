@@ -242,6 +242,7 @@ export function CanvasViewer({
     const makeViewer = (target: HTMLDivElement, showNavigator: boolean) => OpenSeadragon({
       element: target,
       showNavigator,
+      navigatorPosition: 'BOTTOM_RIGHT',
       navigatorAutoFade: false,
       navigatorOpacity: 0.92,
       showRotationControl: false,

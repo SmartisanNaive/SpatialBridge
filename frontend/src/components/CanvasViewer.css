@@ -1,3 +1,16 @@
+/* OSD anchors the containing control at bottom-right. Offset the navigator
+   with margins instead of moving its relative box out of that control. */
+.canvas-wrap .viewer .navigator {
+  inset: auto !important;
+  margin: 0 16px 72px 0 !important;
+}
+
+@media (max-width: 680px) {
+  .canvas-wrap .viewer .navigator {
+    margin: 0 9px 93px 0 !important;
+  }
+}
+
 .coverage:empty {
   display: none;
 }
