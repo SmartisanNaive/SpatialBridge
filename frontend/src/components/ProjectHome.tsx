@@ -1,5 +1,6 @@
 import './ProjectHome.css';
 import HistoryProjects from './HistoryProjects';
+import LetterGlitch from './LetterGlitch';
 import {useEffect, useRef, useState} from 'react';
 import {Alert, Button, Card, Input, Layout, Progress, Space, Typography} from 'antd';
 import {
@@ -367,6 +368,7 @@ export function ProjectHome({
 
   return (
     <Layout className="app project-home-app">
+      <LetterGlitch />
       <header className="home-header">
         <div className="home-brand"><img className="brand-logo small" src="/spatialbridge-logo.png" alt="SpatialBridge logo" /><div><strong>SpatialBridge</strong><span>显微图与 MALDI 空间配准</span></div></div>
         <div className="home-header-meta"><span className="status-dot" />共享项目</div>
