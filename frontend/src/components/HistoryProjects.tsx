@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import {Button, Space} from 'antd';
-import {AppstoreOutlined, DatabaseOutlined, PictureOutlined, ScanOutlined, ThunderboltOutlined} from '@ant-design/icons';
+import {DatabaseOutlined, PictureOutlined, ScanOutlined, ThunderboltOutlined} from '@ant-design/icons';
 import {apiUrl} from '../api';
 import {formatCreatedAt, projectName, projectStatusLabel} from '../flow';
 import type {Project} from '../types';
@@ -28,7 +28,7 @@ export default function HistoryProjects({projects, onOpen, onRetry, busy}: {
       <div><div className="home-card-kicker">项目预览</div><h3>历史项目</h3></div>
       <Space size={6}>
         <Button size="small" type={view === 'cards' ? 'primary' : 'text'} aria-pressed={view === 'cards'} onClick={() => setView('cards')}>卡片</Button>
-        <Button size="small" type={view === 'list' ? 'primary' : 'text'} aria-pressed={view === 'list'} icon={<AppstoreOutlined />} onClick={() => setView('list')}>列表</Button>
+        <Button size="small" type={view === 'list' ? 'primary' : 'text'} aria-pressed={view === 'list'} onClick={() => setView('list')}>列表</Button>
         <span className="home-lens-count">{projects.length} 个</span>
       </Space>
     </div>
