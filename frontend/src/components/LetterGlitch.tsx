@@ -69,7 +69,7 @@ export default function LetterGlitch() {
         // Leave a quieter area behind the main heading and introductory copy.
         const room = clamp(Math.hypot((x - width * .45) / (width * .48), (y - 155) / 180));
         return {character: glyph(), shade: Math.random() < .2 ? 35 : 110,
-          opacity: Math.random() < .58 ? (.065 + Math.random() * .065) * edge * (.2 + .8 * room) : 0};
+          opacity: Math.random() < .58 ? (.085 + Math.random() * .085) * edge * (.2 + .8 * room) : 0};
       });
       cells.forEach((_, index) => paintCell(index));
       sparks = [];

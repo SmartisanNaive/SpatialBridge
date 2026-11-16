@@ -375,7 +375,6 @@ export function ProjectHome({
       </header>
       <main className="project-home">
         <section className="home-intro">
-          <Typography.Text className="eyebrow">PROJECTS / LOCAL WORKSPACE</Typography.Text>
           <Typography.Title>从一个项目开始</Typography.Title>
           <Typography.Paragraph>上传采集前后显微图，生成可复核的空间坐标工作台。</Typography.Paragraph>
           {currentProject && <div className="home-current"><div><span>当前项目 · {projectStatusLabel(currentProject.status)}</span><strong>{projectName(currentProject)}</strong></div><Button size="small" disabled={busy || uploading} onClick={() => onOpen(currentProject)}>继续当前项目</Button></div>}
