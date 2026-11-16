@@ -1,14 +1,14 @@
 import './ProjectHome.css';
+import HistoryProjects from './HistoryProjects';
 import {useEffect, useRef, useState} from 'react';
 import {Alert, Button, Card, Input, Layout, Progress, Space, Typography} from 'antd';
 import {
   CheckCircleOutlined,
-  DatabaseOutlined,
   PauseOutlined,
   PlayCircleOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import {formatCreatedAt, projectName, projectStatusLabel} from '../flow';
+import {projectName, projectStatusLabel} from '../flow';
 import {sha256Hex} from '../hash';
 import {compressionSupported, gzip, shouldCompress} from '../compress';
 import type {CompressionSample} from '../compress';
@@ -411,13 +411,7 @@ export function ProjectHome({
             {(error || uploadError) && <Alert type="error" showIcon message="项目请求失败" description={error || uploadError} />}
             <div className="home-notes"><span><CheckCircleOutlined />来源文件只读</span><span><CheckCircleOutlined />自动建立空间坐标</span><span><CheckCircleOutlined />支持断点续传</span></div>
           </Card>
-          {projects.length > 0 && <Card className="home-recent-card" variant="borderless">
-            <div className="home-recent-heading"><div><div className="home-card-kicker">最近项目</div><Typography.Title level={3}>继续工作</Typography.Title></div><span>{projects.length} 个</span></div>
-            <div className="project-list">{projects.slice(0, 8).map((item) => <div className="project-list-item" key={item.id}>
-              <div className="project-list-icon"><DatabaseOutlined /></div><div className="project-list-main"><strong>{projectName(item)}</strong><span>{formatCreatedAt(item.created_at)} · {projectStatusLabel(item.status)}</span></div>
-              {item.status === 'failed' ? <Button size="small" disabled={busy || !item.source_dir} onClick={() => onRetry(item)}>重试</Button> : item.status === 'ready' ? <Space size={4}><Button size="small" type="primary" disabled={busy} onClick={() => onOpen(item)}>打开工作台</Button><Button size="small" type="link" disabled={busy || !item.source_dir} onClick={() => onRetry(item)}>重新处理</Button></Space> : <Button size="small" type="default" disabled={busy} onClick={() => onOpen(item)}>继续处理</Button>}
-            </div>)}</div>
-          </Card>}
+          <HistoryProjects projects={projects} onOpen={onOpen} onRetry={onRetry} busy={busy} />
         </div>
       </main>
     </Layout>
