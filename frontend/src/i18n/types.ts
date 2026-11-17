@@ -40,6 +40,7 @@ export interface Translations {
   };
   home: {
     brandSubtitle: string;
+    processingCount: (count: number) => string;
     heroTitle: string;
     heroDesc: string;
     currentProjectPrefix: string;
@@ -155,7 +156,9 @@ export interface Translations {
     modeLens: string;
     modeLensHint: string;
     swapLeftRight: string;
+    swapShort: string;
     centerDivider: string;
+    centerShort: string;
     swapInsideOutside: string;
     pendingReview: string;
     imageReady: string;

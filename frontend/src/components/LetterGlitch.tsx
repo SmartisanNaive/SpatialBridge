@@ -135,7 +135,7 @@ export default function LetterGlitch() {
       pointer.y = event.clientY - rect.top;
       pointer.inside = event.pointerType !== 'touch' && pointer.x >= 0 && pointer.x < width &&
         pointer.y >= 0 && pointer.y < height &&
-        !(event.target as Element).closest('.home-grid,.home-header,.home-current');
+        !(event.target as Element).closest('.home-grid,.app-header,.home-header,.home-current');
     };
     const onMove = (event: PointerEvent) => {locate(event);};
     const onLeave = () => {pointer.inside = false;};

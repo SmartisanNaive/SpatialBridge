@@ -9,6 +9,7 @@ import {
   PlayCircleOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
+import {AppHeader} from './AppHeader';
 import HistoryProjects from './HistoryProjects';
 import LetterGlitch from './LetterGlitch';
 import StatusMark, {type MarkStatus} from './StatusMark';
@@ -23,7 +24,7 @@ import type {PngOptimization} from '../png';
 import type {Project, UploadRole, UploadSession} from '../types';
 import {apiUrl, apiFetch, errorText} from '../api';
 import {cachePreviewThumbnail, generateClientThumbnail} from '../utils';
-import {TranslatedText, useI18n, LanguageSwitch} from '../i18n';
+import {TranslatedText, useI18n} from '../i18n';
 
 export const uploadRoleLabels: Record<UploadRole, string> = {
   pre: '采集前显微图 (PNG)', after: '采集后显微图 (PNG)', sbd: 'SBD 数据文件 (可选)',
@@ -598,21 +599,26 @@ export function ProjectHome({
   };
 
 
+  const activeProcessingProjects = projects.filter((item) => item.status === 'running' || item.status === 'queued');
+
   return (
     <Layout className="app project-home-app">
       <LetterGlitch />
-      <header className="home-header">
-        <div className="home-brand">
-          <img className="brand-logo small" src="/spatialbridge-logo.png" alt="SpatialBridge logo" />
-          <div>
-            <strong>SpatialBridge</strong>
-            <span><TranslatedText text={t.home.brandSubtitle} /></span>
-          </div>
-        </div>
-        <div className="home-header-meta">
-          <LanguageSwitch />
-        </div>
-      </header>
+      <AppHeader
+        sticky
+        tagline={t.home.brandSubtitle}
+        actions={activeProcessingProjects.length > 0 ? (
+          <button
+            type="button"
+            className="app-header__live-pill"
+            disabled={busy || uploading}
+            onClick={() => onOpen(activeProcessingProjects[0])}
+          >
+            <span className="app-header__status-dot" aria-hidden="true" />
+            <TranslatedText text={t.home.processingCount(activeProcessingProjects.length)} />
+          </button>
+        ) : undefined}
+      />
       <main className="project-home">
         <section className="home-intro">
           <Typography.Title><TranslatedText text={t.home.heroTitle} /></Typography.Title>

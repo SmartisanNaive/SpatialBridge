@@ -1,11 +1,11 @@
 import {useEffect, useState} from 'react';
-import {Alert, Button, Card, Layout, Progress, Typography, Space} from 'antd';
-import {FolderOpenOutlined} from '@ant-design/icons';
+import {Alert, Button, Card, Layout, Progress, Typography} from 'antd';
 import {projectName} from '../flow';
 import type {Project} from '../types';
 import {apiUrl} from '../api';
 import {getCachedPreviewThumbnail} from '../utils';
-import {TranslatedText, useI18n, LanguageSwitch} from '../i18n';
+import {TranslatedText, useI18n} from '../i18n';
+import {AppHeader} from './AppHeader';
 import CubeLoader from './CubeLoader';
 import StatusMark, {type MarkStatus} from './StatusMark';
 import RefineFrame, {type RefineFrameStatus} from './RefineFrame';
@@ -135,23 +135,21 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
     }
   }, [rawStage]);
 
+  const currentProjectName = projectName(project, language);
+
   return (
     <Layout className="app processing-app">
-      <header className="home-header">
-        <div className="home-brand">
-          <img className="brand-logo small" src="/spatialbridge-logo.png" alt="SpatialBridge logo" />
-          <div>
-            <strong>SpatialBridge</strong>
-            <span><TranslatedText text={t.processing.pageTitle} /></span>
-          </div>
-        </div>
-        <Space size={8}>
-          <LanguageSwitch />
-          <Button onClick={onHome} icon={<FolderOpenOutlined />}><TranslatedText text={t.common.backHome} /></Button>
-        </Space>
-      </header>
+      <AppHeader
+        sticky
+        onHome={onHome}
+        projectTitle={currentProjectName}
+        projectTooltip={`${currentProjectName} · ${project.id.slice(0, 8)}`}
+        status={{
+          label: isQueued ? t.status.queued : t.processing.pageTitle,
+          tone: isQueued ? 'queued' : 'processing',
+        }}
+      />
       <main className="processing-page">
-        <div className="processing-breadcrumb"><TranslatedText text={t.processing.breadcrumbProject} /> / <TranslatedText text={projectName(project, language)} /></div>
         <Card className="processing-card" variant="borderless">
           <div className="processing-loader-header">
             <CubeLoader label={isQueued ? t.processing.loaderQueued : t.processing.loaderRunning} />
@@ -309,23 +307,21 @@ export function FailedProjectScreen({
     error: t.processing.stageError,
   };
 
+  const currentProjectName = projectName(project, language);
+
   return (
     <Layout className="app processing-app">
-      <header className="home-header">
-        <div className="home-brand">
-          <img className="brand-logo small" src="/spatialbridge-logo.png" alt="SpatialBridge logo" />
-          <div>
-            <strong>SpatialBridge</strong>
-            <span><TranslatedText text={t.processing.stageError} /></span>
-          </div>
-        </div>
-        <Space size={8}>
-          <LanguageSwitch />
-          <Button onClick={onHome} icon={<FolderOpenOutlined />}><TranslatedText text={t.common.backHome} /></Button>
-        </Space>
-      </header>
+      <AppHeader
+        sticky
+        onHome={onHome}
+        projectTitle={currentProjectName}
+        projectTooltip={`${currentProjectName} · ${project.id.slice(0, 8)}`}
+        status={{
+          label: t.status.failed,
+          tone: 'error',
+        }}
+      />
       <main className="processing-page">
-        <div className="processing-breadcrumb"><TranslatedText text={t.processing.breadcrumbProject} /> / <TranslatedText text={projectName(project, language)} /></div>
         <Card className="processing-card failed-card" variant="borderless">
           <div className="processing-layout">
             <div className="processing-preview-panel">

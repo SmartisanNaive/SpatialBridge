@@ -21,7 +21,6 @@ import {
   CheckCircleFilled,
   CloseOutlined,
   CompressOutlined,
-  DatabaseOutlined,
   DownloadOutlined,
   EyeOutlined,
   FileSearchOutlined,
@@ -39,6 +38,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import {hasViewport, projectName, selectInitialViewport} from '../flow';
+import {AppHeader} from './AppHeader';
 import GlassSurface from './GlassSurface';
 import './Workbench.css';
 import type {
@@ -65,7 +65,7 @@ import {
   limitationLabel,
   qualityLabel,
 } from '../utils';
-import {TranslatedText, useI18n, LanguageSwitch} from '../i18n';
+import {TranslatedText, useI18n} from '../i18n';
 import {CanvasViewer} from './CanvasViewer';
 
 export function ToolButton({
@@ -543,101 +543,109 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const projectLabel = projectName(project, language);
   const mappingSuccess = mapping?.status === 'calibrated';
 
+  const handleGoHome = () => {
+    spotRequestRef.current += 1;
+    setSelectedSpot(null);
+    setSpotLoading(false);
+    onHome();
+  };
+
   return (
     <>
     {holder}
     <div className={`workspace-app redesigned-workspace${sidebarOpen ? '' : ' sidebar-collapsed'}${reducedMotion ? ' motion-reduced' : ''}`}>
-      <header className="workspace-header">
-        <div className="workspace-brand">
-          <div className="brand-mark" aria-hidden="true">
-            <img src="/spatialbridge-logo.png" alt="" />
-          </div>
-          <div>
-            <div className="workspace-title">SpatialBridge</div>
-            <div className="workspace-subtitle"><DatabaseOutlined /> <TranslatedText text={projectLabel} /> <span>·</span> {project.id.slice(0, 8)}</div>
-          </div>
-        </div>
-        <div className="workspace-flow">
-          <button type="button" className="workspace-back" onClick={onHome}>
-            <FolderOpenOutlined /> <span><TranslatedText text={t.common.backHome} /></span>
-          </button>
-          <span className="workspace-route-separator" aria-hidden="true">/</span>
-          <span className="workspace-route-label"><TranslatedText text={language === 'en' ? 'Analysis Workbench' : '分析工作台'} /></span>
-        </div>
-        <div className="header-observation">
-        <LayoutGroup id="observation-controls">
-          <div className="observation-controls">
-          <nav className="view-tabs mode-tabs" aria-label={t.workbench.viewMode} role="tablist">
-            {([
-              ['single', t.workbench.modeSingle, t.workbench.modeSingleHint],
-              ['compare', t.workbench.modeCompare, t.workbench.modeCompareHint],
-              ['lens', t.workbench.modeLens, t.workbench.modeLensHint],
-            ] as Array<[ViewMode, string, string]>).map(([value, label, hint]) => (
-              <Tooltip title={hint} key={value}>
-                <button type="button" role="tab" aria-selected={mode === value} className={mode === value ? 'is-active' : ''} onClick={() => chooseMode(value)}>
-                  {mode === value && <motion.span className="tab-selection" layoutId="observation-mode-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
-                  <span className="tab-label"><TranslatedText text={label} /></span>
-                </button>
-              </Tooltip>
-            ))}
-          </nav>
-          <AnimatePresence initial={false} mode="popLayout">
-            <motion.div
-              className={`mode-operations mode-operations-${mode}`}
-              key={mode}
-              initial={{opacity: 0, y: -3}}
-              animate={{opacity: 1, y: 0}}
-              exit={{opacity: 0, y: 3}}
-              transition={{duration: reducedMotion ? 0 : .16}}
-            >
-              {mode === 'single' && (
-                <div className="mode-operations-panel mode-layer-switch" role="group" aria-label={t.workbench.singleLayerAria}>
-                  {(['pre', 'after'] as ViewLayer[]).map((value) => (
-                    <button type="button" className={`mode-layer-option${currentLayer === value ? ' is-active' : ''}`} aria-pressed={currentLayer === value} key={value} onClick={() => chooseLayer(value)}>
-                      {currentLayer === value && <motion.span className="tab-selection" layoutId="single-layer-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
-                      <span className="tab-label"><TranslatedText text={value === 'pre' ? t.common.pre : t.common.after} /></span>
-                    </button>
+      <AppHeader
+        className="app-header--workbench"
+        onHome={handleGoHome}
+        projectTitle={projectLabel}
+        projectTooltip={`${projectLabel} · ${project.id.slice(0, 8)}`}
+        status={!mappingSuccess ? {
+          label: mapping?.available ? t.workbench.pendingReview : t.workbench.imageReady,
+          tone: 'warning',
+        } : undefined}
+        center={
+          <div className="header-observation">
+            <LayoutGroup id="observation-controls">
+              <div className="observation-controls">
+                <nav className="view-tabs mode-tabs" aria-label={t.workbench.viewMode} role="tablist">
+                  {([
+                    ['single', t.workbench.modeSingle, t.workbench.modeSingleHint],
+                    ['compare', t.workbench.modeCompare, t.workbench.modeCompareHint],
+                    ['lens', t.workbench.modeLens, t.workbench.modeLensHint],
+                  ] as Array<[ViewMode, string, string]>).map(([value, label, hint]) => (
+                    <Tooltip title={hint} key={value}>
+                      <button type="button" role="tab" aria-selected={mode === value} className={mode === value ? 'is-active' : ''} onClick={() => chooseMode(value)}>
+                        {mode === value && <motion.span className="tab-selection" layoutId="observation-mode-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
+                        <span className="tab-label"><TranslatedText text={label} /></span>
+                      </button>
+                    </Tooltip>
                   ))}
-                </div>
-              )}
-              {mode === 'compare' && (
-                <div className="mode-operations-panel" role="group" aria-label="compare-operations">
-                  <div className="mode-role-pair" aria-label={t.workbench.compareLayerAria(currentLayer === 'pre' ? t.common.pre : t.common.after, compareLayer === 'pre' ? t.common.pre : t.common.after)}>
-                    <span className="mode-role"><small><TranslatedText text={t.common.left} /></small><strong><TranslatedText text={currentLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
-                    <span className="mode-role-divider" aria-hidden="true">／</span>
-                    <span className="mode-role"><small><TranslatedText text={t.common.right} /></small><strong><TranslatedText text={compareLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
-                  </div>
-                  <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label={t.workbench.swapLeftRight}><SwapOutlined /><span><TranslatedText text={t.workbench.swapLeftRight} /></span></button>
-                  <button type="button" className="mode-action" onClick={() => setComparePosition(50)} aria-label={t.workbench.centerDivider}><span aria-hidden="true">↔</span><span><TranslatedText text={t.workbench.centerDivider} /></span></button>
-                  <span className="mode-readout" aria-live="polite">{Math.round(comparePosition)}%</span>
-                </div>
-              )}
-              {mode === 'lens' && (
-                <div className="mode-operations-panel" role="group" aria-label="lens-operations">
-                  <div className="mode-role-pair" aria-label={t.workbench.lensLayerAria(currentLayer === 'pre' ? t.common.pre : t.common.after, lensLayer === 'pre' ? t.common.pre : t.common.after)}>
-                    <span className="mode-role"><small><TranslatedText text={t.common.outer} /></small><strong><TranslatedText text={currentLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
-                    <span className="mode-role-divider" aria-hidden="true">／</span>
-                    <span className="mode-role"><small><TranslatedText text={t.common.inner} /></small><strong><TranslatedText text={lensLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
-                  </div>
-                  <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label={t.workbench.swapInsideOutside}><SwapOutlined /><span><TranslatedText text={t.workbench.swapInsideOutside} /></span></button>
-                </div>
-              )}
-            </motion.div>
-          </AnimatePresence>
+                </nav>
+                <AnimatePresence initial={false} mode="popLayout">
+                  <motion.div
+                    className={`mode-operations mode-operations-${mode}`}
+                    key={mode}
+                    initial={{opacity: 0, y: -3}}
+                    animate={{opacity: 1, y: 0}}
+                    exit={{opacity: 0, y: 3}}
+                    transition={{duration: reducedMotion ? 0 : .16}}
+                  >
+                    {mode === 'single' && (
+                      <div className="mode-operations-panel mode-layer-switch" role="group" aria-label={t.workbench.singleLayerAria}>
+                        {(['pre', 'after'] as ViewLayer[]).map((value) => (
+                          <button type="button" className={`mode-layer-option${currentLayer === value ? ' is-active' : ''}`} aria-pressed={currentLayer === value} key={value} onClick={() => chooseLayer(value)}>
+                            {currentLayer === value && <motion.span className="tab-selection" layoutId="single-layer-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
+                            <span className="tab-label"><TranslatedText text={value === 'pre' ? t.common.pre : t.common.after} /></span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {mode === 'compare' && (
+                      <div className="mode-operations-panel" role="group" aria-label="compare-operations">
+                        <div className="mode-role-pair" aria-label={t.workbench.compareLayerAria(currentLayer === 'pre' ? t.common.pre : t.common.after, compareLayer === 'pre' ? t.common.pre : t.common.after)}>
+                          <span className="mode-role"><small><TranslatedText text={t.common.left} /></small><strong><TranslatedText text={currentLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
+                          <span className="mode-role-divider" aria-hidden="true">/</span>
+                          <span className="mode-role"><small><TranslatedText text={t.common.right} /></small><strong><TranslatedText text={compareLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
+                        </div>
+                        <Tooltip title={<TranslatedText text={t.workbench.swapLeftRight} />}>
+                          <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label={t.workbench.swapLeftRight}><SwapOutlined /><span><TranslatedText text={t.workbench.swapShort} /></span></button>
+                        </Tooltip>
+                        <Tooltip title={<TranslatedText text={t.workbench.centerDivider} />}>
+                          <button type="button" className="mode-action" onClick={() => setComparePosition(50)} aria-label={t.workbench.centerDivider}><span aria-hidden="true">↔</span><span><TranslatedText text={t.workbench.centerShort} /></span></button>
+                        </Tooltip>
+                        <span className="mode-readout" aria-live="polite">{Math.round(comparePosition)}%</span>
+                      </div>
+                    )}
+                    {mode === 'lens' && (
+                      <div className="mode-operations-panel" role="group" aria-label="lens-operations">
+                        <div className="mode-role-pair" aria-label={t.workbench.lensLayerAria(currentLayer === 'pre' ? t.common.pre : t.common.after, lensLayer === 'pre' ? t.common.pre : t.common.after)}>
+                          <span className="mode-role"><small><TranslatedText text={t.common.outer} /></small><strong><TranslatedText text={currentLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
+                          <span className="mode-role-divider" aria-hidden="true">/</span>
+                          <span className="mode-role"><small><TranslatedText text={t.common.inner} /></small><strong><TranslatedText text={lensLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
+                        </div>
+                        <Tooltip title={<TranslatedText text={t.workbench.swapInsideOutside} />}>
+                          <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label={t.workbench.swapInsideOutside}><SwapOutlined /><span><TranslatedText text={t.workbench.swapShort} /></span></button>
+                        </Tooltip>
+                      </div>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+            </LayoutGroup>
           </div>
-        </LayoutGroup>
-        </div>
-        <div className="header-actions">
-          {!mappingSuccess && <div className="header-result is-warning">
-            <SettingOutlined />
-            <span><TranslatedText text={mapping?.available ? t.workbench.pendingReview : t.workbench.imageReady} /></span>
-          </div>}
-          <Button type="text" icon={<FileSearchOutlined />} onClick={() => setReportOpen(true)}><TranslatedText text={t.workbench.reportBtn} /></Button>
-          <Tooltip title={<TranslatedText text={maldiAvailable ? t.workbench.exportCsvTooltip : t.workbench.exportCsvNoDataTooltip} />}>
-            <Button type="text" icon={<DownloadOutlined />} disabled={!maldiAvailable} href={maldiAvailable ? `${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}` : undefined} target="_blank"><TranslatedText text={t.workbench.exportCsvBtn} /></Button>
-          </Tooltip>
-          <Button className={saveConfirmed ? 'save-confirmed' : ''} type="primary" icon={saveConfirmed ? <CheckCircleFilled /> : <SaveOutlined />} loading={saving} onClick={save}><TranslatedText text={saveConfirmed ? t.workbench.savedBtn : t.workbench.saveViewBtn} /></Button>
-          <LanguageSwitch compact />
+        }
+        actions={
+          <>
+            <Tooltip title={<TranslatedText text={t.workbench.reportTitle} />}>
+              <Button type="text" icon={<FileSearchOutlined />} onClick={() => setReportOpen(true)}><TranslatedText text={t.workbench.reportBtn} /></Button>
+            </Tooltip>
+            <Tooltip title={<TranslatedText text={maldiAvailable ? t.workbench.exportCsvTooltip : t.workbench.exportCsvNoDataTooltip} />}>
+              <Button type="text" icon={<DownloadOutlined />} disabled={!maldiAvailable} href={maldiAvailable ? `${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}` : undefined} target="_blank"><TranslatedText text={t.workbench.exportCsvBtn} /></Button>
+            </Tooltip>
+            <Button className={saveConfirmed ? 'save-confirmed' : ''} type="primary" icon={saveConfirmed ? <CheckCircleFilled /> : <SaveOutlined />} loading={saving} onClick={save}><TranslatedText text={saveConfirmed ? t.workbench.savedBtn : t.workbench.saveViewBtn} /></Button>
+          </>
+        }
+        mobileActions={
           <Dropdown
             className="mobile-actions"
             menu={{items: [
@@ -649,14 +657,13 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               if (key === 'report') setReportOpen(true);
               if (key === 'export' && maldiAvailable) window.open(`${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}`, '_blank');
               if (key === 'lang') toggleLanguage();
-              if (key === 'home') { spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false); onHome(); }
+              if (key === 'home') handleGoHome();
             }}}
           >
-            <Button aria-label={t.common.moreActions} icon={<MoreOutlined />} />
+            <Button size="small" aria-label={t.common.moreActions} icon={<MoreOutlined />} />
           </Dropdown>
-          <Tooltip title={<TranslatedText text={t.common.backHome} />}><Button className="home-nav-button" aria-label={t.common.backHome} icon={<FolderOpenOutlined />} onClick={() => {spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false); onHome();}} /></Tooltip>
-        </div>
-      </header>
+        }
+      />
 
       <div className="workspace-body">
         <aside className={`control-sidebar${sidebarOpen ? '' : ' is-hidden'}`} aria-label={t.workbench.sidebarTitle}>

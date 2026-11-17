@@ -1,14 +1,26 @@
-.header-observation .mode-operations-lens {
-  width: max-content;
-  flex: 0 0 auto;
+.header-observation .mode-operations {
+  width: auto;
+  max-width: 100%;
+  flex: 0 1 auto;
 }
 
+.mode-operations-single,
+.mode-operations-lens {
+  width: max-content;
+}
+
+.mode-operations-panel {
+  width: max-content;
+  max-width: 100%;
+}
+
+.mode-operations-compare .mode-operations-panel,
 .mode-operations-lens .mode-operations-panel {
-  width: max-content;
-  gap: 12px;
-  padding-inline: 8px;
+  gap: 6px;
+  padding-inline: 8px 6px;
 }
 
+.mode-operations-compare .mode-role-pair,
 .mode-operations-lens .mode-role-pair {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
 }
