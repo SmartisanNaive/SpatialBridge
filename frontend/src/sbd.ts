@@ -22,7 +22,7 @@ export function extractSbd(file: File, options: {
 } = {}): Promise<SbdExtraction> {
   return new Promise((resolve, reject) => {
     if (options.signal?.aborted) {
-      reject(new DOMException('提取已取消', 'AbortError'));
+      reject(new DOMException('已取消提取', 'AbortError'));
       return;
     }
     const worker = new Worker(new URL('./sbd.worker.ts', import.meta.url), {type: 'module'});
@@ -31,10 +31,10 @@ export function extractSbd(file: File, options: {
       worker.terminate();
     };
     const fail = (error: Error) => {cleanup(); reject(error);};
-    const abort = () => fail(new DOMException('提取已取消', 'AbortError'));
+    const abort = () => fail(new DOMException('已取消提取', 'AbortError'));
     options.signal?.addEventListener('abort', abort, {once: true});
-    worker.onerror = (event) => fail(new Error(`无法启动 SBD 本地提取：${event.message}`));
-    worker.onmessageerror = () => fail(new Error('无法读取 SBD 本地提取结果'));
+    worker.onerror = (event) => fail(new Error(`启动 SBD 数据提取失败：${event.message}`));
+    worker.onmessageerror = () => fail(new Error('读取 SBD 提取结果失败'));
     worker.onmessage = ({data}: MessageEvent<WorkerReply>) => {
       if (data.type === 'progress') options.onProgress?.(data.progress);
       else if (data.type === 'error') fail(new Error(data.message));

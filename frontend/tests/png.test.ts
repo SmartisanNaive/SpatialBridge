@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {deflateSync, inflateSync} from 'node:zlib';
 import {randomBytes} from 'node:crypto';
-import {optimizePngData, pngChunk, pngCrc} from '../src/png-core.ts';
+import {optimizePngData, pngChunk, pngCrc, readPngDimensions} from '../src/png-core.ts';
 
 function fixture({depth = 8, interlaced = false, level = 0, noise = false} = {}) {
   const width = 1024, height = 128;
@@ -79,4 +79,13 @@ test('malformed and truncated PNG data safely fall back to the original', async 
   const idat = Buffer.from(bytes).indexOf('IDAT');
   bytes.fill(255, idat + 8, idat + 64);
   assert.deepEqual(await optimizePngData(new Blob([bytes])), {reason: 'unchanged'});
+});
+
+test('readPngDimensions correctly reads dimensions from valid PNG', async () => {
+  const {blob} = fixture();
+  const dims = await readPngDimensions(blob);
+  assert.deepEqual(dims, {width: 1024, height: 128});
+
+  const invalid = new Blob(['not a png']);
+  assert.equal(await readPngDimensions(invalid), null);
 });

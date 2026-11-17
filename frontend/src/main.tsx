@@ -8,6 +8,7 @@ import type {Project, DemoInfo} from './types';
 import {apiFetch, errorText} from './api';
 import {ProjectHome} from './components/ProjectHome';
 import {ProcessingScreen, FailedProjectScreen} from './components/StatusScreens';
+import {TranslatedText, LanguageProvider, useI18n} from './i18n';
 import 'antd/dist/reset.css';
 import './styles.css';
 
@@ -16,6 +17,7 @@ import './styles.css';
 const Workbench = lazy(() => import('./components/Workbench').then((module) => ({default: module.Workbench})));
 
 function RedesignedApp() {
+  const {t, language} = useI18n();
   const [route, setRoute] = useState<AppRoute>(() => parseRoute());
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -146,7 +148,7 @@ function RedesignedApp() {
       } catch {
         // The next scheduled refresh retries without repeatedly surfacing a
         // toast while the processing task continues in the backend.
-        if (active) setHomeError('项目列表暂时无法刷新，正在自动重试。');
+        if (active) setHomeError(t.main.refreshFailed);
         delay = Math.min(delay * 2, 8000);
       } finally {
         if (active) timer = window.setTimeout(refresh, delay);
@@ -154,7 +156,7 @@ function RedesignedApp() {
     };
     timer = window.setTimeout(refresh, delay);
     return () => { active = false; if (timer) window.clearTimeout(timer); };
-  }, [activeProject?.id, activeProject?.status, hasProcessingProjects, route.kind === 'project' ? route.id : '']);
+  }, [activeProject?.id, activeProject?.status, hasProcessingProjects, route.kind === 'project' ? route.id : '', t.main.refreshFailed]);
 
   const startDemo = async () => {
     if (busyRef.current) return;
@@ -167,7 +169,7 @@ function RedesignedApp() {
       setProjects((items) => [item, ...items.filter((existing) => existing.id !== item.id)]);
       navigateProject(item.id);
     } catch (error) {
-      setHomeError(errorText(error));
+      setHomeError(errorText(error, language));
     } finally { busyRef.current = false; setBusy(false); }
   };
   const retryProject = async (item: Project) => {
@@ -181,7 +183,7 @@ function RedesignedApp() {
       setProjects((items) => [retried, ...items.filter((existing) => existing.id !== retried.id)]);
       navigateProject(retried.id);
     } catch (error) {
-      setHomeError(errorText(error));
+      setHomeError(errorText(error, language));
     } finally { busyRef.current = false; setBusy(false); }
   };
   const handleUploadedProject = (item: Project) => {
@@ -191,7 +193,7 @@ function RedesignedApp() {
   };
   const openProject = (item: Project) => { setActiveProject(null); navigateProject(item.id); };
 
-  const routeLoading = <div className="route-loading"><Spin size="large" /><span>正在打开项目…</span></div>;
+  const routeLoading = <div className="route-loading"><Spin size="large" /><span><TranslatedText text={t.main.loadingProject} /></span></div>;
   let content: React.ReactNode;
   if (route.kind === 'home') {
     content = <ProjectHome projects={projects} currentProject={activeProject} onProject={handleUploadedProject} onDemo={startDemo} demoAvailable={demoAvailable} onOpen={openProject} onRetry={retryProject} busy={busy} error={homeError || undefined} />;
@@ -200,7 +202,7 @@ function RedesignedApp() {
   } else if (activeProject.status === 'failed') {
     content = <FailedProjectScreen project={activeProject} onHome={navigateHome} onRetry={() => retryProject(activeProject)} busy={busy} error={homeError || undefined} />;
   } else if (activeProject.status === 'ready' && !activeProject.report) {
-    content = <FailedProjectScreen project={activeProject} onHome={navigateHome} onRetry={() => retryProject(activeProject)} busy={busy} error="项目已完成但报告不可用，请重新处理来源目录。" />;
+    content = <FailedProjectScreen project={activeProject} onHome={navigateHome} onRetry={() => retryProject(activeProject)} busy={busy} error={t.main.missingReport} />;
   } else if (activeProject.status !== 'ready') {
     content = <ProcessingScreen project={activeProject} onHome={navigateHome} connectionError={connectionError || undefined} />;
   } else {
@@ -210,6 +212,10 @@ function RedesignedApp() {
 }
 
 const appRoot = ReactDOM.createRoot(document.getElementById('root')!);
-appRoot.render(<RedesignedApp />);
+appRoot.render(
+  <LanguageProvider>
+    <RedesignedApp />
+  </LanguageProvider>
+);
 const hotModule = (import.meta as ImportMeta & {hot?: {dispose: (callback: () => void) => void}}).hot;
 hotModule?.dispose(() => appRoot.unmount());

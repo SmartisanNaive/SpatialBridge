@@ -12,18 +12,18 @@ const numericTypes: Record<string, string> = {
 const targets = ['Registrations/0', 'MeasurementRasterIndices', 'SpectraGroup/Normalizations', 'OpticalImages'];
 
 function dtype(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('SBD 所需字段包含暂不支持的复合类型或引用');
+  if (typeof value !== 'string') throw new Error('SBD 字段包含不支持的复合类型或引用');
   const numeric = numericTypes[value.startsWith('|') ? '<' + value.slice(1) : value];
   if (numeric) return numeric;
   if (/^[|<>=]?[AS]\d*$/.test(value)) return 'string';
-  throw new Error(`SBD 所需字段包含暂不支持的数据类型：${value}`);
+  throw new Error(`SBD 字段包含不支持的数据类型：${value}`);
 }
 
 function values(value: unknown): string[] {
   if (ArrayBuffer.isView(value) && !(value instanceof DataView)) return Array.from(value as unknown as ArrayLike<number | bigint>, String);
   if (Array.isArray(value)) return value.flatMap(values);
   if (['string', 'number', 'bigint', 'boolean'].includes(typeof value)) return [String(value)];
-  throw new Error('SBD 所需字段包含暂不支持的空值或引用');
+  throw new Error('SBD 字段包含不支持的空值或引用');
 }
 
 function attributes(entity: Group | Dataset): SbdAttribute[] {
@@ -33,7 +33,7 @@ function attributes(entity: Group | Dataset): SbdAttribute[] {
     if (attribute.shape === null) throw new Error(`SBD 属性为空：${name}`);
     const type = dtype(attribute.dtype);
     const count = attribute.shape.reduce((a, b) => a * b, 1);
-    if (!Number.isSafeInteger(count) || count > 65536 || (attribute.metadata.size ?? 0) * count > 1024 * 1024) throw new Error(`SBD 属性过大：${name}`);
+    if (!Number.isSafeInteger(count) || count > 65536 || (attribute.metadata.size ?? 0) * count > 1024 * 1024) throw new Error(`SBD 属性超出大小限制：${name}`);
     return {name, dtype: type, shape: attribute.shape, values: values(attribute.value)};
   });
 }
@@ -68,7 +68,7 @@ scope.onmessage = async ({data: {file}}) => {
     FS.mkdir('/input');
     FS.mount(FS.filesystems.WORKERFS, {blobs: [{name: 'source.sbd', data: file}]}, '/input');
     mounted = true;
-    progress('正在本地读取 SBD 目录…', 0, targets.length);
+    progress('正在解析 SBD 目录结构…', 0, targets.length);
     input = new h5wasm.File('/input/source.sbd', 'r');
     const manifest: SbdManifest = {format: 'sbd-extract', version: 1, source: {name: file.name, size: file.size}, groups: [], datasets: []};
     const datasets: Array<{path: string; entity: Dataset}> = [];
@@ -77,10 +77,10 @@ scope.onmessage = async ({data: {file}}) => {
       for (const key of group.keys().sort()) visit(path ? `${path}/${key}` : key, group.get(key));
     };
     const visit = (path: string, entity: unknown) => {
-      if (datasets.length + manifest.groups.length > 4096) throw new Error('SBD 所需数据组过多');
+      if (datasets.length + manifest.groups.length > 4096) throw new Error('SBD 数据分组超出数量上限');
       if (entity instanceof h5wasm.Dataset) datasets.push({path, entity});
       else if (entity instanceof h5wasm.Group) addGroup(path, entity);
-      else throw new Error(`SBD 所需字段不是独立的数据集或数据组：${path}`);
+      else throw new Error(`SBD 数据格式不符合规范：${path}`);
     };
     // Only these subtrees are traversed. The raw spectra arrays are never opened.
     manifest.groups.push({path: '', attrs: attributes(input)});
@@ -91,7 +91,7 @@ scope.onmessage = async ({data: {file}}) => {
     for (const path of targets) {
       const entity = input.get(path);
       if (entity) visit(path, entity);
-      else if (!path.endsWith('Normalizations')) throw new Error(`SBD 缺少必要数据：${path}`);
+      else if (!path.endsWith('Normalizations')) throw new Error(`SBD 缺少必要的数据节点：${path}`);
     }
     const blocks: Uint8Array[] = [];
     let byteOffset = 0;
@@ -100,12 +100,12 @@ scope.onmessage = async ({data: {file}}) => {
       const shape = entity.shape;
       if (shape === null) throw new Error(`SBD 数据集为空：${path}`);
       const count = shape.reduce((a, b) => a * b, 1);
-      if (!Number.isSafeInteger(count) || count < 0 || count * (entity.metadata.size || 8) > MAX_SBD_BYTES - byteOffset) throw new Error(`SBD 所需数据集过大：${path}`);
+      if (!Number.isSafeInteger(count) || count < 0 || count * (entity.metadata.size || 8) > MAX_SBD_BYTES - byteOffset) throw new Error(`SBD 数据集大小超出限制：${path}`);
       const chunkBytes = entity.metadata.chunks?.reduce((a, b) => a * b, entity.metadata.size) ?? 0;
-      if (!Number.isSafeInteger(chunkBytes) || chunkBytes > 32 * 1024 * 1024 || entity.metadata.virtual_sources?.length) throw new Error(`SBD 字段使用过大的分块或外部虚拟数据：${path}`);
+      if (!Number.isSafeInteger(chunkBytes) || chunkBytes > 32 * 1024 * 1024 || entity.metadata.virtual_sources?.length) throw new Error(`SBD 数据分块过大或包含外部虚拟数据：${path}`);
       const unsupported = entity.filters.find((filter) => filter.id > 6);
-      if (unsupported) throw new Error(`SBD 字段 ${path} 使用暂不支持的压缩过滤器 ${unsupported.id}`);
-      progress(`正在本地提取 SBD 数据（${index + 1}/${datasets.length}）…`, index, datasets.length);
+      if (unsupported) throw new Error(`SBD 字段 ${path} 使用了不支持的压缩方式（${unsupported.id}）`);
+      progress(`正在提取 SBD 数据（${index + 1}/${datasets.length}）…`, index, datasets.length);
       const item: SbdDataset = {path, dtype: type, shape, attrs: attributes(entity)};
       const data = entity.value;
       if (type === 'string') item.values = values(data);
@@ -114,22 +114,22 @@ scope.onmessage = async ({data: {file}}) => {
         item.offset = byteOffset;
         item.length = block.byteLength;
         byteOffset += block.byteLength;
-        if (byteOffset > MAX_SBD_BYTES) throw new Error('SBD 所需数据超过 128 MiB 限制');
+        if (byteOffset > MAX_SBD_BYTES) throw new Error('SBD 提取数据超出 128 MB 限制');
         blocks.push(block);
-      } else throw new Error(`SBD 数值字段无法读取：${path}`);
+      } else throw new Error(`无法读取 SBD 数值：${path}`);
       manifest.datasets.push(item);
       stats.wasmBytes = Math.max(stats.wasmBytes, M.HEAPU8.buffer.byteLength);
     }
     input.close(); input = undefined;
     FS.unmount('/input'); mounted = false;
-    progress('正在校验本地精简数据…', datasets.length, datasets.length);
+    progress('正在校验提取的数据…', datasets.length, datasets.length);
     const buffer = packSbd(manifest, blocks);
     const hash = await sha256Hex(buffer);
     const stem = file.name.replace(/\.sbd$/i, '');
     stats.outputBytes = buffer.byteLength;
     scope.postMessage({type: 'done', buffer, name: `${stem}.spatialbridge-${hash.slice(0, 16)}.sbdx`, stats}, [buffer]);
   } catch (error) {
-    scope.postMessage({type: 'error', message: `SBD 本地提取失败：${error instanceof Error ? error.message : String(error)}。原始 SBD 未上传。`});
+    scope.postMessage({type: 'error', message: `SBD 数据提取失败：${error instanceof Error ? error.message : String(error)}（未上传原始文件）。`});
   } finally {
     try {input?.close();} finally {release();}
   }

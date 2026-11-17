@@ -14,24 +14,31 @@ export function parseRoute(hash?: string): AppRoute {
   try { return {kind: 'project', id: decodeURIComponent(match[1])}; } catch { return {kind: 'home'}; }
 }
 
-export function projectName(project: ProjectLike) {
+export function projectName(project: ProjectLike, lang: 'zh' | 'en' = 'zh') {
   if (project.project_name?.trim()) return project.project_name.trim();
   const source = project.source_dir?.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-  return source || `项目 ${project.id.slice(0, 8)}`;
+  return source || (lang === 'en' ? `Project ${project.id.slice(0, 8)}` : `项目 ${project.id.slice(0, 8)}`);
 }
 
-export function projectStatusLabel(status: string) {
-  if (status === 'ready') return '可复核';
+export function projectStatusLabel(status: string, lang: 'zh' | 'en' = 'zh') {
+  if (lang === 'en') {
+    if (status === 'ready') return 'Ready';
+    if (status === 'failed') return 'Failed';
+    if (status === 'assembling') return 'Assembling';
+    if (status === 'running') return 'Processing';
+    return 'Queued';
+  }
+  if (status === 'ready') return '已就绪';
   if (status === 'failed') return '处理失败';
   if (status === 'assembling') return '文件合并中';
   if (status === 'running') return '处理中';
-  return '等待处理';
+  return '排队中';
 }
 
-export function formatCreatedAt(value?: string) {
-  if (!value) return '创建时间未知';
+export function formatCreatedAt(value?: string, lang: 'zh' | 'en' = 'zh') {
+  if (!value) return '—';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '创建时间未知' : date.toLocaleString('zh-CN', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
 }
 
 export function selectInitialViewport(session: ViewLike | null | undefined, saved: ViewLike | null | undefined) {

@@ -10,7 +10,7 @@
     "prebuild": "node scripts/copy-osd-images.mjs",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
-    "test:flow": "node --experimental-strip-types --test tests/flow.test.ts tests/pointer-gesture.test.ts tests/hash.test.ts tests/compress.test.ts tests/sbd-package.test.ts tests/png.test.ts tests/grid-detail.test.ts",
+    "test:flow": "node --experimental-strip-types --test tests/flow.test.ts tests/pointer-gesture.test.ts tests/hash.test.ts tests/compress.test.ts tests/sbd-package.test.ts tests/png.test.ts tests/grid-detail.test.ts tests/i18n.test.ts",
     "test": "npm run test:flow"
   },
   "dependencies": {

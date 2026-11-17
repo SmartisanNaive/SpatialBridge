@@ -24,6 +24,21 @@ export function pngChunk(kind: string, bytes: Uint8Array): ArrayBuffer {
   return result.buffer;
 }
 
+export async function readPngDimensions(file: Blob): Promise<{width: number; height: number} | null> {
+  try {
+    const slice = await file.slice(0, 32).arrayBuffer();
+    if (slice.byteLength < 24) return null;
+    const view = new DataView(slice);
+    if (view.getUint32(0) !== 0x89504e47 || view.getUint32(4) !== 0x0d0a1a0a) return null;
+    if (view.getUint32(12) !== 0x49484452) return null;
+    const width = view.getUint32(16);
+    const height = view.getUint32(20);
+    return {width, height};
+  } catch {
+    return null;
+  }
+}
+
 /** Recompress the filtered scanlines, preserving their bytes and every non-IDAT chunk.
  * No canvas, pixel conversion, or full decoded-image buffer is used.
  */

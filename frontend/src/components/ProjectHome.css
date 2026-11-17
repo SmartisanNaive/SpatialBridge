@@ -47,8 +47,9 @@
   flex: 0 0 auto;
 }
 
-.upload-file-state { color: var(--green); font-size: 10px; }
+.upload-file-state { color: var(--green, #2d6a5b); font-size: 10px; transition: color 0.3s ease; }
 .upload-file-state[data-status="pending"] { color: var(--muted); }
+.upload-file-state[data-status="running"] { color: var(--green, #2d6a5b); }
 .upload-file-state[data-status="failed"] { color: #b65b51; }
 .upload-file-state[data-status="paused"] { color: #8b7860; }
 .home-import-card .upload-progress-block { padding: 12px; }

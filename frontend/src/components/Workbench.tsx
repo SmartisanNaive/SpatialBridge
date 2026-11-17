@@ -1,5 +1,3 @@
-import GlassSurface from './GlassSurface';
-import './Workbench.css';
 import React, {useEffect, useRef, useState} from 'react';
 import {AnimatePresence, LayoutGroup, motion} from 'motion/react';
 import {
@@ -41,6 +39,8 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import {hasViewport, projectName, selectInitialViewport} from '../flow';
+import GlassSurface from './GlassSurface';
+import './Workbench.css';
 import type {
   Project,
   Viewport,
@@ -63,7 +63,9 @@ import {
   manualPointsFromView,
   methodLabel,
   limitationLabel,
+  qualityLabel,
 } from '../utils';
+import {TranslatedText, useI18n, LanguageSwitch} from '../i18n';
 import {CanvasViewer} from './CanvasViewer';
 
 export function ToolButton({
@@ -85,13 +87,14 @@ export function ToolButton({
     <Tooltip title={shortcut ? `${label} · ${shortcut}` : label} placement="top">
       <button type="button" className={`tool-button${active ? ' is-active' : ''}`} onClick={onClick} disabled={disabled}>
         <span className="tool-button-icon">{icon}</span>
-        <span>{label}</span>
+        <span><TranslatedText text={label} /></span>
       </button>
     </Tooltip>
   );
 }
 
 export function Workbench({project, onHome}: {project: Project; onHome: () => void}) {
+  const {t, language, toggleLanguage} = useI18n();
   const [layer, setLayer] = useState<ViewLayer>('pre');
   const [viewport, setViewport] = useState<Viewport>({});
   const [pixelsPerImagePixel, setPixelsPerImagePixel] = useState(0);
@@ -184,7 +187,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         setAutoPitTotal(result.detected_total);
       })
       .catch((error) => {
-        if (active) messageApi.error(`灼烧坑显示失败：${errorText(error)}`);
+        if (active) messageApi.error(t.workbench.failedLoadSpots(errorText(error, language)));
       });
     return () => { active = false; };
   }, [maldiAvailable, mapping?.detected_pit_count, mapping?.primary_raster, messageApi, project?.id, project?.status]);
@@ -222,7 +225,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       }
       setHeatmapColors(colors);
     }).catch((error) => {
-      if (active) setHeatmapError(`热图读取失败：${errorText(error)}`);
+      if (active) setHeatmapError(t.workbench.failedLoadHeatmap(errorText(error, language)));
     }).finally(() => { if (active) setHeatmapLoading(false); });
     return () => { active = false; };
   }, [project.id, project.status, mapping?.primary_raster, heatmapVersion]);
@@ -230,7 +233,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const uploadHeatmap = async () => {
     if (!heatmapFile || heatmapUploading) return;
     if (heatmapFile.type !== 'image/png' && !/\.png$/i.test(heatmapFile.name)) {
-      setHeatmapError('请选择 PNG 图片。');
+      setHeatmapError(t.workbench.selectPngOnly);
       return;
     }
     const token = ++heatmapUploadToken.current;
@@ -246,7 +249,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       setShowHeatmap(true);
       setHeatmapVersion((version) => version + 1);
     } catch (error) {
-      if (token === heatmapUploadToken.current) setHeatmapError(`热图配准失败：${errorText(error)}`);
+      if (token === heatmapUploadToken.current) setHeatmapError(t.workbench.failedRegHeatmap(errorText(error, language)));
     } finally {
       if (token === heatmapUploadToken.current) setHeatmapUploading(false);
     }
@@ -324,7 +327,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         if (typeof settings.reducedMotion === 'boolean') setReducedMotion(settings.reducedMotion);
         sessionHydratedRef.current = true;
         setSelectedSpot(null);
-        messageApi.warning(next.x != null ? '未能读取服务器保存视野，已恢复当前标签页会话' : '未能读取已保存视野，已使用全图打开项目');
+        messageApi.warning(next.x != null ? t.workbench.restoredSession : t.workbench.restoredOverview);
       })
       .finally(() => { if (active) setViewLoaded(true); });
     return () => { active = false; sessionHydratedRef.current = false; };
@@ -385,7 +388,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
     sessionPersistRef.current = null;
   }, [sessionKey]);
 
-  if (!report || !preSource || !afterSource) return <>{holder}<div className="canvas-empty">该项目缺少可用的显微图配准结果。</div></>;
+  if (!report || !preSource || !afterSource) return <>{holder}<div className="canvas-empty"><TranslatedText text={t.workbench.noRegData} /></div></>;
 
   const hasSavedView = hasViewport(savedViewportRef.current);
   const restoreSavedView = () => {
@@ -418,7 +421,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   };
   const activeSource = currentLayer === 'after' ? afterSource : preSource;
   const activeRegistration = report.registrations.find((item) => item.source_key === currentLayer) ?? report.registrations[0];
-  if (!activeRegistration) return <>{holder}<div className="canvas-empty">该项目缺少可用的配准结果。</div></>;
+  if (!activeRegistration) return <>{holder}<div className="canvas-empty"><TranslatedText text={t.workbench.noAvailableRegData} /></div></>;
   const pitDetection = mapping?.metrics?.pit_detection;
   const chainP95 = mapping?.coordinate_validation?.world_chain_pre_vs_after_px?.p95_px;
   const opticalP95 = mapping?.metrics?.lattice_matching?.optical_validation?.candidates?.find(
@@ -453,7 +456,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   };
   const handleSpotSelect = async (point: {x: number; y: number; layer: string}) => {
     if (!maldiAvailable) {
-      messageApi.info('当前来源没有可用的 SBD 点位缓存');
+      messageApi.info(t.workbench.noCachedSbdSpots);
       return;
     }
     const requestId = spotRequestRef.current + 1;
@@ -467,7 +470,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       );
       if (requestId !== spotRequestRef.current) return;
       if (!match.found) {
-        messageApi.info(match.reason ?? '点击位置附近没有对应的 SBD 点');
+        messageApi.info(t.workbench.noSpotNearClick(match.reason));
         return;
       }
       setSelectedSpot(match);
@@ -476,7 +479,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       }
     } catch (error) {
       if (requestId !== spotRequestRef.current) return;
-      messageApi.error(`读取 MALDI 点失败：${errorText(error)}`);
+      messageApi.error(t.workbench.failedReadSpot(errorText(error, language)));
     } finally {
       if (requestId === spotRequestRef.current) setSpotLoading(false);
     }
@@ -511,7 +514,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       setSaveConfirmed(true);
       window.setTimeout(() => setSaveConfirmed(false), 1800);
     } catch (error) {
-      messageApi.error(`保存失败：${errorText(error)}`);
+      messageApi.error(t.workbench.failedSave(errorText(error, language)));
     } finally {
       setSaving(false);
     }
@@ -532,12 +535,12 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
     : 0;
   const scaleBarWidth = scaleDistance > 0 ? Math.max(24, Math.min(120, scaleDistance * pixelsPerMicron)) : 28;
   const scaleLabel = scaleDistance >= 1000 ? `${(scaleDistance / 1000).toFixed(scaleDistance % 1000 ? 1 : 0)} mm` : `${scaleDistance} μm`;
-  const scaleText = reliableScale && scaleDistance > 0 ? `${scaleLabel} · 图上约 ${scaleBarWidth.toFixed(1)} px` : '比例尺不可用';
+  const scaleText = reliableScale && scaleDistance > 0 ? `${scaleLabel} · ~${scaleBarWidth.toFixed(1)} px` : t.workbench.scaleUnavailable;
   const rasterText = mapping?.primary_raster == null ? 'Raster —' : `Raster ${mapping.primary_raster}`;
   const coordinateText = viewport.imageX == null || viewport.imageY == null
-    ? '坐标 —'
-    : `坐标 ${Math.round(viewport.imageX).toLocaleString()}, ${Math.round(viewport.imageY).toLocaleString()} px`;
-  const projectLabel = projectName(project);
+    ? t.workbench.coordEmpty
+    : t.workbench.coordPrefix(Math.round(viewport.imageX).toLocaleString(), Math.round(viewport.imageY).toLocaleString());
+  const projectLabel = projectName(project, language);
   const mappingSuccess = mapping?.status === 'calibrated';
 
   return (
@@ -551,29 +554,29 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
           </div>
           <div>
             <div className="workspace-title">SpatialBridge</div>
-            <div className="workspace-subtitle"><DatabaseOutlined /> {projectLabel} <span>·</span> {project.id.slice(0, 8)}</div>
+            <div className="workspace-subtitle"><DatabaseOutlined /> <TranslatedText text={projectLabel} /> <span>·</span> {project.id.slice(0, 8)}</div>
           </div>
         </div>
         <div className="workspace-flow">
           <button type="button" className="workspace-back" onClick={onHome}>
-            <FolderOpenOutlined /> <span>项目首页</span>
+            <FolderOpenOutlined /> <span><TranslatedText text={t.common.backHome} /></span>
           </button>
           <span className="workspace-route-separator" aria-hidden="true">/</span>
-          <span className="workspace-route-label">数据工作台</span>
+          <span className="workspace-route-label"><TranslatedText text={language === 'en' ? 'Analysis Workbench' : '分析工作台'} /></span>
         </div>
         <div className="header-observation">
         <LayoutGroup id="observation-controls">
           <div className="observation-controls">
-          <nav className="view-tabs mode-tabs" aria-label="观察模式" role="tablist">
+          <nav className="view-tabs mode-tabs" aria-label={t.workbench.viewMode} role="tablist">
             {([
-              ['single', '单图', '选择采集前或采集后'],
-              ['compare', '卷帘', '同步视口，拖动分界线'],
-              ['lens', '透镜', '同坐标局部放大对比'],
+              ['single', t.workbench.modeSingle, t.workbench.modeSingleHint],
+              ['compare', t.workbench.modeCompare, t.workbench.modeCompareHint],
+              ['lens', t.workbench.modeLens, t.workbench.modeLensHint],
             ] as Array<[ViewMode, string, string]>).map(([value, label, hint]) => (
               <Tooltip title={hint} key={value}>
                 <button type="button" role="tab" aria-selected={mode === value} className={mode === value ? 'is-active' : ''} onClick={() => chooseMode(value)}>
                   {mode === value && <motion.span className="tab-selection" layoutId="observation-mode-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
-                  <span className="tab-label">{label}</span>
+                  <span className="tab-label"><TranslatedText text={label} /></span>
                 </button>
               </Tooltip>
             ))}
@@ -588,35 +591,35 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               transition={{duration: reducedMotion ? 0 : .16}}
             >
               {mode === 'single' && (
-                <div className="mode-operations-panel mode-layer-switch" role="group" aria-label="单图图层">
+                <div className="mode-operations-panel mode-layer-switch" role="group" aria-label={t.workbench.singleLayerAria}>
                   {(['pre', 'after'] as ViewLayer[]).map((value) => (
                     <button type="button" className={`mode-layer-option${currentLayer === value ? ' is-active' : ''}`} aria-pressed={currentLayer === value} key={value} onClick={() => chooseLayer(value)}>
                       {currentLayer === value && <motion.span className="tab-selection" layoutId="single-layer-selection" transition={{duration: reducedMotion ? 0 : .18}} />}
-                      <span className="tab-label">{value === 'pre' ? '采集前' : '采集后'}</span>
+                      <span className="tab-label"><TranslatedText text={value === 'pre' ? t.common.pre : t.common.after} /></span>
                     </button>
                   ))}
                 </div>
               )}
               {mode === 'compare' && (
-                <div className="mode-operations-panel" role="group" aria-label="卷帘图像与操作">
-                  <div className="mode-role-pair" aria-label={`左侧${currentLayer === 'pre' ? '采集前' : '采集后'}，右侧${compareLayer === 'pre' ? '采集前' : '采集后'}`}>
-                    <span className="mode-role"><small>左</small><strong>{currentLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                <div className="mode-operations-panel" role="group" aria-label="compare-operations">
+                  <div className="mode-role-pair" aria-label={t.workbench.compareLayerAria(currentLayer === 'pre' ? t.common.pre : t.common.after, compareLayer === 'pre' ? t.common.pre : t.common.after)}>
+                    <span className="mode-role"><small><TranslatedText text={t.common.left} /></small><strong><TranslatedText text={currentLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
                     <span className="mode-role-divider" aria-hidden="true">／</span>
-                    <span className="mode-role"><small>右</small><strong>{compareLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                    <span className="mode-role"><small><TranslatedText text={t.common.right} /></small><strong><TranslatedText text={compareLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
                   </div>
-                  <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label="交换左右图像"><SwapOutlined /><span>交换左右</span></button>
-                  <button type="button" className="mode-action" onClick={() => setComparePosition(50)} aria-label="复位分界线"><span aria-hidden="true">↔</span><span>复位分界</span></button>
+                  <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label={t.workbench.swapLeftRight}><SwapOutlined /><span><TranslatedText text={t.workbench.swapLeftRight} /></span></button>
+                  <button type="button" className="mode-action" onClick={() => setComparePosition(50)} aria-label={t.workbench.centerDivider}><span aria-hidden="true">↔</span><span><TranslatedText text={t.workbench.centerDivider} /></span></button>
                   <span className="mode-readout" aria-live="polite">{Math.round(comparePosition)}%</span>
                 </div>
               )}
               {mode === 'lens' && (
-                <div className="mode-operations-panel" role="group" aria-label="透镜图像与操作">
-                  <div className="mode-role-pair" aria-label={`外部${currentLayer === 'pre' ? '采集前' : '采集后'}，内部${lensLayer === 'pre' ? '采集前' : '采集后'}`}>
-                    <span className="mode-role"><small>外</small><strong>{currentLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                <div className="mode-operations-panel" role="group" aria-label="lens-operations">
+                  <div className="mode-role-pair" aria-label={t.workbench.lensLayerAria(currentLayer === 'pre' ? t.common.pre : t.common.after, lensLayer === 'pre' ? t.common.pre : t.common.after)}>
+                    <span className="mode-role"><small><TranslatedText text={t.common.outer} /></small><strong><TranslatedText text={currentLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
                     <span className="mode-role-divider" aria-hidden="true">／</span>
-                    <span className="mode-role"><small>内</small><strong>{lensLayer === 'pre' ? '采集前' : '采集后'}</strong></span>
+                    <span className="mode-role"><small><TranslatedText text={t.common.inner} /></small><strong><TranslatedText text={lensLayer === 'pre' ? t.common.pre : t.common.after} /></strong></span>
                   </div>
-                  <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label="交换内外图像"><SwapOutlined /><span>交换内外</span></button>
+                  <button type="button" className={`mode-action${swapLayers ? ' is-active' : ''}`} onClick={toggleComparisonLayers} aria-label={t.workbench.swapInsideOutside}><SwapOutlined /><span><TranslatedText text={t.workbench.swapInsideOutside} /></span></button>
                 </div>
               )}
             </motion.div>
@@ -627,44 +630,47 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         <div className="header-actions">
           {!mappingSuccess && <div className="header-result is-warning">
             <SettingOutlined />
-            <span>{mapping?.available ? '需复核' : '图像已就绪'}</span>
+            <span><TranslatedText text={mapping?.available ? t.workbench.pendingReview : t.workbench.imageReady} /></span>
           </div>}
-          <Button type="text" icon={<FileSearchOutlined />} onClick={() => setReportOpen(true)}>配准报告</Button>
-          <Tooltip title={maldiAvailable ? '导出已确认灼烧坑及对应 normalization 数值' : '当前项目没有可用 MALDI/SBD 数据'}>
-            <Button type="text" icon={<DownloadOutlined />} disabled={!maldiAvailable} href={maldiAvailable ? `${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}` : undefined} target="_blank">导出灼烧坑 CSV</Button>
+          <Button type="text" icon={<FileSearchOutlined />} onClick={() => setReportOpen(true)}><TranslatedText text={t.workbench.reportBtn} /></Button>
+          <Tooltip title={<TranslatedText text={maldiAvailable ? t.workbench.exportCsvTooltip : t.workbench.exportCsvNoDataTooltip} />}>
+            <Button type="text" icon={<DownloadOutlined />} disabled={!maldiAvailable} href={maldiAvailable ? `${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}` : undefined} target="_blank"><TranslatedText text={t.workbench.exportCsvBtn} /></Button>
           </Tooltip>
-          <Button className={saveConfirmed ? 'save-confirmed' : ''} type="primary" icon={saveConfirmed ? <CheckCircleFilled /> : <SaveOutlined />} loading={saving} onClick={save}>{saveConfirmed ? '已保存' : '保存视野'}</Button>
+          <Button className={saveConfirmed ? 'save-confirmed' : ''} type="primary" icon={saveConfirmed ? <CheckCircleFilled /> : <SaveOutlined />} loading={saving} onClick={save}><TranslatedText text={saveConfirmed ? t.workbench.savedBtn : t.workbench.saveViewBtn} /></Button>
+          <LanguageSwitch compact />
           <Dropdown
             className="mobile-actions"
             menu={{items: [
-              {key: 'report', label: '打开配准报告'},
-              {key: 'export', label: '导出灼烧坑 CSV', disabled: !maldiAvailable},
-              {key: 'home', label: '返回项目首页'},
+              {key: 'report', label: t.workbench.viewReportAction},
+              {key: 'export', label: t.workbench.exportCsvAction, disabled: !maldiAvailable},
+              {key: 'lang', label: language === 'zh' ? 'English (EN)' : '中文版 (ZH)'},
+              {key: 'home', label: t.common.backHome},
             ], onClick: ({key}) => {
               if (key === 'report') setReportOpen(true);
               if (key === 'export' && maldiAvailable) window.open(`${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}`, '_blank');
+              if (key === 'lang') toggleLanguage();
               if (key === 'home') { spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false); onHome(); }
             }}}
           >
-            <Button aria-label="更多操作" icon={<MoreOutlined />} />
+            <Button aria-label={t.common.moreActions} icon={<MoreOutlined />} />
           </Dropdown>
-          <Tooltip title="返回项目首页"><Button className="home-nav-button" aria-label="返回项目首页" icon={<FolderOpenOutlined />} onClick={() => {spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false); onHome();}} /></Tooltip>
+          <Tooltip title={<TranslatedText text={t.common.backHome} />}><Button className="home-nav-button" aria-label={t.common.backHome} icon={<FolderOpenOutlined />} onClick={() => {spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false); onHome();}} /></Tooltip>
         </div>
       </header>
 
       <div className="workspace-body">
-        <aside className={`control-sidebar${sidebarOpen ? '' : ' is-hidden'}`} aria-label="图层与分析控制">
+        <aside className={`control-sidebar${sidebarOpen ? '' : ' is-hidden'}`} aria-label={t.workbench.sidebarTitle}>
           <div className="sidebar-scroll">
             <div className="sidebar-heading">
-              <h2>观察与叠加</h2>
-              <Tooltip title="收起控制栏"><button type="button" className="icon-button" onClick={() => setSidebarOpen(false)} aria-label="收起控制栏"><MenuFoldOutlined /></button></Tooltip>
+              <h2><TranslatedText text={t.workbench.sidebarTitle} /></h2>
+              <Tooltip title={<TranslatedText text={t.workbench.collapseSidebar} />}><button type="button" className="icon-button" onClick={() => setSidebarOpen(false)} aria-label={t.workbench.collapseSidebar}><MenuFoldOutlined /></button></Tooltip>
             </div>
             <section className="control-section project-summary">
-              <div className="section-heading"><span>项目摘要</span><span className="section-meta">只读</span></div>
-              <div className="summary-row"><span>来源</span><strong title={projectLabel}>{projectLabel}</strong></div>
-              {!mappingSuccess && <div className="summary-row"><span>映射状态</span><strong className="summary-muted">{mapping?.available ? '需复核' : report?.maldi_data?.available ? 'SBD 已读取，尚未定位' : '无 MALDI 数据'}</strong></div>}
-              <div className="summary-row"><span>SBD 采样点</span><strong>{report?.maldi_data?.spot_count?.toLocaleString() ?? '—'}</strong></div>
-              <div className="summary-row"><span>已映射点</span><strong>{mapping?.mapped_spot_count?.toLocaleString() ?? '—'}</strong></div>
+              <div className="section-heading"><span><TranslatedText text={t.workbench.projectInfo} /></span><span className="section-meta"><TranslatedText text={t.workbench.readOnly} /></span></div>
+              <div className="summary-row"><span><TranslatedText text={t.workbench.projectName} /></span><strong title={projectLabel}><TranslatedText text={projectLabel} /></strong></div>
+              {!mappingSuccess && <div className="summary-row"><span><TranslatedText text={t.workbench.regStatus} /></span><strong className="summary-muted"><TranslatedText text={mapping?.available ? t.workbench.pendingReview : report?.maldi_data?.available ? t.workbench.sbdReadNotMapped : t.workbench.noMassSpecData} /></strong></div>}
+              <div className="summary-row"><span><TranslatedText text={t.workbench.sbdSpots} /></span><strong>{report?.maldi_data?.spot_count?.toLocaleString() ?? '—'}</strong></div>
+              <div className="summary-row"><span><TranslatedText text={t.workbench.mappedSpots} /></span><strong>{mapping?.mapped_spot_count?.toLocaleString() ?? '—'}</strong></div>
             </section>
             <AnimatePresence initial={false} mode="wait">
               {mode === 'lens' && (
@@ -676,80 +682,80 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                   exit={{opacity: 0, height: 0, y: -4}}
                   transition={{duration: reducedMotion ? 0 : .18}}
                 >
-                  <div className="section-heading"><span>透镜设置</span><span className="section-meta">当前模式</span></div>
+                  <div className="section-heading"><span><TranslatedText text={t.workbench.lensSettings} /></span><span className="section-meta"><TranslatedText text={t.workbench.currentMode} /></span></div>
                   <div className="parameter-block lens-setting-block">
-                    <div className="parameter-label"><span>窗口大小</span><span className="parameter-value">{lensSize} px</span></div>
-                    <input className="sidebar-range" aria-label="透镜窗口大小" type="range" min="150" max="340" step="10" value={lensSize} onChange={(event) => setLensSize(Number(event.target.value))} />
+                    <div className="parameter-label"><span><TranslatedText text={t.workbench.lensSize} /></span><span className="parameter-value">{lensSize} px</span></div>
+                    <input className="sidebar-range" aria-label={t.workbench.lensSize} type="range" min="150" max="340" step="10" value={lensSize} onChange={(event) => setLensSize(Number(event.target.value))} />
                   </div>
                   <div className="parameter-block lens-setting-block">
-                    <div className="parameter-label"><span>内外重叠度</span><span className="parameter-value">{lensOverlap}%</span></div>
-                    <input className="sidebar-range" aria-label="透镜内外重叠度" type="range" min="0" max="100" step="5" value={lensOverlap} onChange={(event) => setLensOverlap(Number(event.target.value))} />
+                    <div className="parameter-label"><span><TranslatedText text={t.workbench.lensOverlap} /></span><span className="parameter-value">{lensOverlap}%</span></div>
+                    <input className="sidebar-range" aria-label={t.workbench.lensOverlap} type="range" min="0" max="100" step="5" value={lensOverlap} onChange={(event) => setLensOverlap(Number(event.target.value))} />
                   </div>
-                  <div className="switch-row"><span><AimOutlined /> 固定透镜位置</span><Switch size="small" checked={lensFixed} onChange={setLensFixed} /></div>
+                  <div className="switch-row"><span><AimOutlined /> <TranslatedText text={t.workbench.lockLens} /></span><Switch size="small" checked={lensFixed} onChange={setLensFixed} /></div>
                 </motion.section>
               )}
             </AnimatePresence>
 
             <section className="control-section">
-              <div className="section-heading"><span>叠加与参数</span></div>
-              <div className="switch-row"><span><EyeOutlined /> 采样网格</span><Switch size="small" checked={showGrid} onChange={setShowGrid} /></div>
-              <div className="switch-row"><span><AimOutlined /> 灼烧坑标记 <em>{autoPitTotal.toLocaleString()}</em></span><Switch size="small" checked={showPits} onChange={setShowPits} disabled={!maldiAvailable} /></div>
-              <div className="parameter-block opacity-block"><div className="parameter-label"><span>叠加透明度</span><span className="parameter-value">{overlayOpacity}%</span></div><Slider min={0} max={100} value={overlayOpacity} onChange={setOverlayOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
-              {!maldiAvailable && <div className="sidebar-empty-note">{report?.maldi_data?.available
-                ? `SBD 已读取，但尚未建立显微图坐标对应关系，暂时无法显示光斑标记与导出 CSV。${mapping?.reason ?? ''}`
-                : '当前未读取 MALDI/SBD 数据，无法显示光斑标记与导出 CSV。'}</div>}
+              <div className="section-heading"><span><TranslatedText text={t.workbench.layerOverlay} /></span></div>
+              <div className="switch-row"><span><EyeOutlined /> <TranslatedText text={t.workbench.samplingGrid} /></span><Switch size="small" checked={showGrid} onChange={setShowGrid} /></div>
+              <div className="switch-row"><span><AimOutlined /> <TranslatedText text={t.workbench.burnPits} /> <em>{autoPitTotal.toLocaleString()}</em></span><Switch size="small" checked={showPits} onChange={setShowPits} disabled={!maldiAvailable} /></div>
+              <div className="parameter-block opacity-block"><div className="parameter-label"><span><TranslatedText text={t.workbench.layerOpacity} /></span><span className="parameter-value">{overlayOpacity}%</span></div><Slider min={0} max={100} value={overlayOpacity} onChange={setOverlayOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
+              {!maldiAvailable && <div className="sidebar-empty-note"><TranslatedText text={report?.maldi_data?.available
+                ? t.workbench.sbdNotMappedWarning(mapping?.reason)
+                : t.workbench.noSbdWarning} /></div>}
             </section>
 
             <section className="control-section">
-              <div className="section-heading"><span>MALDI 热图</span></div>
-              {heatmapUploading ? <div className="sidebar-empty-note">正在上传并进行空间配准…</div> : heatmapLoading ? <div className="sidebar-empty-note">正在载入热图…</div> : heatmap?.available ? (
+              <div className="section-heading"><span><TranslatedText text={t.workbench.maldiHeatmap} /></span></div>
+              {heatmapUploading ? <div className="sidebar-empty-note"><TranslatedText text={t.workbench.heatmapUploading} /></div> : heatmapLoading ? <div className="sidebar-empty-note"><TranslatedText text={t.workbench.heatmapLoading} /></div> : heatmap?.available ? (
                 <div className="sidebar-empty-note">
-                  {heatmap.label || heatmap.filename || 'PNG 热图'}
+                  <TranslatedText text={heatmap.label || heatmap.filename || t.workbench.heatmapPng} />
                 </div>
-              ) : <div className="sidebar-empty-note">{heatmap?.warning || '暂未导入热图，可按需添加。'}</div>}
+              ) : <div className="sidebar-empty-note"><TranslatedText text={heatmap?.warning || t.workbench.noHeatmap} /></div>}
               {heatmapError && <Alert type="error" showIcon message={heatmapError} />}
               {heatmap?.available && <>
-                <div className="switch-row"><span><EyeOutlined /> 显示热图</span><Switch size="small" checked={showHeatmap} onChange={setShowHeatmap} disabled={!heatmapColors.size} /></div>
-                <div className="parameter-block opacity-block"><div className="parameter-label"><span>热图透明度</span><span className="parameter-value">{heatmapOpacity}%</span></div><Slider min={0} max={100} value={heatmapOpacity} onChange={setHeatmapOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
+                <div className="switch-row"><span><EyeOutlined /> <TranslatedText text={t.workbench.showHeatmap} /></span><Switch size="small" checked={showHeatmap} onChange={setShowHeatmap} disabled={!heatmapColors.size} /></div>
+                <div className="parameter-block opacity-block"><div className="parameter-label"><span><TranslatedText text={t.workbench.heatmapOpacity} /></span><span className="parameter-value">{heatmapOpacity}%</span></div><Slider min={0} max={100} value={heatmapOpacity} onChange={setHeatmapOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
               </>}
               <Collapse className="sidebar-collapse" ghost items={[{
                 key: 'upload',
-                label: heatmap?.available ? '更换热图' : '添加热图（可选）',
+                label: heatmap?.available ? t.workbench.replaceHeatmap : t.workbench.addHeatmap,
                 children: <>
                   <label className={`heatmap-file-picker${heatmapUploading ? ' is-disabled' : ''}`}>
-                    <input key={`${project.id}-${heatmapVersion}`} type="file" accept="image/png,.png" aria-label="选择 PNG 热图" disabled={heatmapUploading} onChange={(event) => setHeatmapFile(event.target.files?.[0] ?? null)} />
-                    <span className="heatmap-file-button"><FolderOpenOutlined /> 选择文件</span>
+                    <input key={`${project.id}-${heatmapVersion}`} type="file" accept="image/png,.png" aria-label={t.workbench.selectPngHeatmap} disabled={heatmapUploading} onChange={(event) => setHeatmapFile(event.target.files?.[0] ?? null)} />
+                    <span className="heatmap-file-button"><FolderOpenOutlined /> <TranslatedText text={t.common.selectFile} /></span>
                     {heatmapFile && <span className="heatmap-file-name" title={heatmapFile.name}>{heatmapFile.name}</span>}
                   </label>
-                  <Input size="small" aria-label="热图标注" placeholder="标注名称，如 726.5025 m/z（选填）" value={heatmapLabel} onChange={(event) => setHeatmapLabel(event.target.value)} disabled={heatmapUploading} />
-                  <Button size="small" icon={<UploadOutlined />} loading={heatmapUploading} disabled={!heatmapFile || !maldiAvailable} onClick={uploadHeatmap} style={{marginTop: 8}}>上传并自动配准</Button>
-                  {!maldiAvailable && <div className="sidebar-empty-note">需具备 MALDI/SBD 坐标数据方可配准热图。</div>}
+                  <Input size="small" aria-label={t.workbench.maldiHeatmap} placeholder={t.workbench.heatmapLabelPlaceholder} value={heatmapLabel} onChange={(event) => setHeatmapLabel(event.target.value)} disabled={heatmapUploading} />
+                  <Button size="small" icon={<UploadOutlined />} loading={heatmapUploading} disabled={!heatmapFile || !maldiAvailable} onClick={uploadHeatmap} style={{marginTop: 8}}><TranslatedText text={t.workbench.uploadAndRegister} /></Button>
+                  {!maldiAvailable && <div className="sidebar-empty-note"><TranslatedText text={t.workbench.needSbdForHeatmap} /></div>}
                 </>,
               }]} />
             </section>
 
             <Collapse className="sidebar-collapse" ghost items={[{
               key: 'details',
-              label: <span><SlidersOutlined /> 数据详情</span>,
+              label: <span><SlidersOutlined /> <TranslatedText text={t.workbench.regParamsTitle} /></span>,
               children: <div className="sidebar-detail-list">
-                <div><span>来源</span><strong>{activeSource.label}</strong></div>
-                <div><span>配准方法</span><strong>{methodLabel(activeRegistration.method)}</strong></div>
-                <div><span>坐标模型</span><strong>{mapping?.coordinate_model ? `degree ${mapping.coordinate_model.degree}` : '—'}</strong></div>
-                <div><span>校准版本</span><strong>{mapping?.calibration_version ?? '—'}</strong></div>
+                <div><span><TranslatedText text={t.workbench.currentLayer} /></span><strong>{activeSource.label}</strong></div>
+                <div><span><TranslatedText text={t.workbench.regMethod} /></span><strong><TranslatedText text={methodLabel(activeRegistration.method, language)} /></strong></div>
+                <div><span><TranslatedText text={t.workbench.coordModel} /></span><strong>{mapping?.coordinate_model ? `degree ${mapping.coordinate_model.degree}` : '—'}</strong></div>
+                <div><span><TranslatedText text={t.workbench.calibrationVer} /></span><strong>{mapping?.calibration_version ?? '—'}</strong></div>
                 {heatmap?.available && <>
-                  {heatmapOrientation(heatmap) && <div><span>热图方向</span><strong>{heatmapOrientation(heatmap)}</strong></div>}
-                  {heatmap.inliers != null && <div><span>热图有效匹配点</span><strong>{heatmap.inliers}</strong></div>}
-                  {heatmap.error_p95_px != null && <div><span>板图配准误差 p95</span><strong>{spotNumber(heatmap.error_p95_px, 2)} px</strong></div>}
+                  {heatmapOrientation(heatmap, language) && <div><span><TranslatedText text={t.workbench.heatmapOrientation} /></span><strong><TranslatedText text={heatmapOrientation(heatmap, language)} /></strong></div>}
+                  {heatmap.inliers != null && <div><span><TranslatedText text={t.workbench.heatmapInliers} /></span><strong>{heatmap.inliers}</strong></div>}
+                  {heatmap.error_p95_px != null && <div><span><TranslatedText text={t.workbench.plateRegError} /></span><strong>{spotNumber(heatmap.error_p95_px, 2)} px</strong></div>}
                 </>}
               </div>,
             }]} />
             <div className="sidebar-footer">
-              <div><span>减少动态效果</span><Switch size="small" checked={reducedMotion} onChange={setReducedMotion} /></div>
+              <div><span><TranslatedText text={t.workbench.reduceMotion} /></span><Switch size="small" checked={reducedMotion} onChange={setReducedMotion} /></div>
             </div>
           </div>
         </aside>
 
-        {!sidebarOpen && <Tooltip title="展开控制栏"><button type="button" className="sidebar-reopen" onClick={() => setSidebarOpen(true)} aria-label="展开控制栏"><MenuUnfoldOutlined /></button></Tooltip>}
+        {!sidebarOpen && <Tooltip title={<TranslatedText text={t.workbench.expandSidebar} />}><button type="button" className="sidebar-reopen" onClick={() => setSidebarOpen(true)} aria-label={t.workbench.expandSidebar}><MenuUnfoldOutlined /></button></Tooltip>}
 
         <main className="workspace-main">
           {viewLoaded ? (
@@ -785,12 +791,31 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                 lensSwap={swapLayers}
                 reducedMotion={reducedMotion}
               />
-              <motion.div className="canvas-toolbar" role="toolbar" aria-label="画布工具">
-                <ToolButton icon={<ZoomInOutlined />} label="放大" onClick={() => dispatchCanvasEvent('spatialbridge-zoom-in')} shortcut="+" />
-                <ToolButton icon={<ZoomOutOutlined />} label="缩小" onClick={() => dispatchCanvasEvent('spatialbridge-zoom-out')} shortcut="−" />
-                <ToolButton icon={<CompressOutlined />} label="查看全图" onClick={() => dispatchCanvasEvent('spatialbridge-fit')} shortcut="H" />
-                <ToolButton icon={<AimOutlined />} label={selectedSpot ? '定位选中点' : '查看采样区域'} onClick={() => dispatchCanvasEvent('spatialbridge-locate')} shortcut="L" />
-                <ToolButton icon={<HomeOutlined />} label="恢复已保存视野" onClick={restoreSavedView} disabled={!hasSavedView} shortcut="R" />
+              <motion.div className="canvas-toolbar" role="toolbar" aria-label="canvas-toolbar">
+                <GlassSurface
+                  width="max-content"
+                  height="auto"
+                  borderRadius={24}
+                  borderWidth={0.07}
+                  brightness={50}
+                  opacity={0.93}
+                  blur={11}
+                  displace={0.5}
+                  backgroundOpacity={0.1}
+                  saturation={1}
+                  distortionScale={-180}
+                  redOffset={0}
+                  greenOffset={10}
+                  blueOffset={20}
+                  refraction={true}
+                  className="canvas-toolbar-glass"
+                >
+                  <ToolButton icon={<ZoomInOutlined />} label={t.workbench.zoomIn} onClick={() => dispatchCanvasEvent('spatialbridge-zoom-in')} shortcut="+" />
+                  <ToolButton icon={<ZoomOutOutlined />} label={t.workbench.zoomOut} onClick={() => dispatchCanvasEvent('spatialbridge-zoom-out')} shortcut="−" />
+                  <ToolButton icon={<CompressOutlined />} label={t.workbench.fit} onClick={() => dispatchCanvasEvent('spatialbridge-fit')} shortcut="H" />
+                  <ToolButton icon={<AimOutlined />} label={selectedSpot ? t.workbench.focusSpot : t.workbench.locateArea} onClick={() => dispatchCanvasEvent('spatialbridge-locate')} shortcut="L" />
+                  <ToolButton icon={<HomeOutlined />} label={t.workbench.restoreView} onClick={restoreSavedView} disabled={!hasSavedView} shortcut="R" />
+                </GlassSurface>
               </motion.div>
               {((showPits && maldiAvailable) || (showGrid && gridPoints.length > 0)) && <div className="canvas-legend">
                 <GlassSurface
@@ -807,19 +832,19 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                   distortionScale={-120}
                   className="canvas-legend-glass"
                 >
-                  {showPits && maldiAvailable && <span className="legend-item"><i className="legend-line legend-confirmed" />已确认</span>}
-                  {showGrid && gridPoints.length > 0 && <span className="legend-item"><i className="legend-line legend-candidate" />网格候选</span>}
+                  {showPits && maldiAvailable && <span className="legend-item"><i className="legend-line legend-confirmed" /><TranslatedText text={t.workbench.legendDetected} /></span>}
+                  {showGrid && gridPoints.length > 0 && <span className="legend-item"><i className="legend-line legend-candidate" /><TranslatedText text={t.workbench.legendGrid} /></span>}
                 </GlassSurface>
               </div>}
               <div className="canvas-statusbar">
-                <span className="scale-readout">{reliableScale && scaleDistance > 0 && <i className="scale-line" style={{width: `${scaleBarWidth}px`}} />}{scaleText}</span>
-                <span>{coordinateText}</span>
-                <span>缩放 {viewport.zoom == null ? '—' : `${viewport.zoom.toFixed(2)}×`}</span>
-                <span>{rasterText} · 范围 {mapping?.mapped_spot_count?.toLocaleString() ?? '—'} 点 · 坐标链一致性 p95 {Number.isFinite(chainP95) ? `${chainP95!.toFixed(3)} px` : '—'}</span>
+                <span className="scale-readout">{reliableScale && scaleDistance > 0 && <i className="scale-line" style={{width: `${scaleBarWidth}px`}} />}<TranslatedText text={scaleText} /></span>
+                <span><TranslatedText text={coordinateText} /></span>
+                <span><TranslatedText text={t.workbench.zoomPrefix(viewport.zoom == null ? '—' : viewport.zoom.toFixed(2))} /></span>
+                <span><TranslatedText text={rasterText} /> · <TranslatedText text={t.workbench.totalSpots(mapping?.mapped_spot_count?.toLocaleString() ?? '—')} /> · <TranslatedText text={t.workbench.coordConsistency(Number.isFinite(chainP95) ? `${chainP95!.toFixed(3)} px` : '—')} /></span>
               </div>
             </div>
           ) : (
-            <div className="canvas-empty"><div className="loading-stack"><Spin /><span>正在恢复上次视野…</span></div></div>
+            <div className="canvas-empty"><div className="loading-stack"><Spin /><span><TranslatedText text={t.workbench.loadingView} /></span></div></div>
           )}
         </main>
       </div>
@@ -832,22 +857,22 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         mask={false}
         closable={false}
         onClose={() => {spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false);}}
-        title={<div className="drawer-title"><div><strong>选中 MALDI 点</strong></div><button type="button" className="icon-button" onClick={() => {spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false);}} aria-label="关闭点位详情"><CloseOutlined /></button></div>}
+        title={<div className="drawer-title"><div><strong><TranslatedText text={t.workbench.spotDetails} /></strong></div><button type="button" className="icon-button" onClick={() => {spotRequestRef.current += 1; setSelectedSpot(null); setSpotLoading(false);}} aria-label={t.workbench.closeSpotDetails}><CloseOutlined /></button></div>}
       >
-        {spotLoading ? <motion.div className="drawer-loading" initial={{opacity: 0}} animate={{opacity: 1}} transition={{duration: reducedMotion ? 0 : .18}}><Spin /><span>正在读取对应的 SBD 数据…</span></motion.div> : selectedSpot && (
+        {spotLoading ? <motion.div className="drawer-loading" initial={{opacity: 0}} animate={{opacity: 1}} transition={{duration: reducedMotion ? 0 : .18}}><Spin /><span><TranslatedText text={t.workbench.loadingSbdData} /></span></motion.div> : selectedSpot && (
           <motion.div className="spot-inspector" initial={{opacity: 0, x: 12}} animate={{opacity: 1, x: 0}} transition={{duration: reducedMotion ? 0 : .2}}>
-            <div className="spot-hero"><span className="spot-id">SPOT #{selectedSpot.spot_id}</span><Tag color={selectedSpot.detected ? 'success' : 'default'}>{selectedSpot.detected ? '图像确认' : '网格候选'}</Tag><strong>{spotNumber(selectedSpot.value, 3)}</strong><small>{selectedSpot.field_label ?? '当前 normalization 字段'}</small></div>
-            <div className="inspector-section"><div className="inspector-label">热图图片颜色采样</div>{selectedSpot.raster === (mapping?.primary_raster ?? 0) && heatmapColors.has(selectedSpot.spot_id) ? <div className="inspector-value"><span>{heatmap?.label || heatmap?.filename || 'PNG 热图'}</span><strong><span aria-hidden="true" style={{display: 'inline-block', width: 14, height: 14, background: heatmapColors.get(selectedSpot.spot_id), border: '1px solid currentColor', marginRight: 8, verticalAlign: 'middle'}} />{heatmapColors.get(selectedSpot.spot_id)}</strong></div> : <Typography.Text type="secondary">此点没有可用的图片颜色（可能被采集框遮挡或位于有效区域外）</Typography.Text>}</div>
-            <div className="inspector-section"><div className="inspector-label">Normalization 值</div>{selectedSpot.normalizations?.length ? selectedSpot.normalizations.map((value) => <div className={`inspector-value${value.key === (selectedSpot.field_key ?? selectedFieldKey) ? ' is-selected' : ''}`} key={value.key}><span>{value.label}</span><strong>{spotNumber(value.value, 3)}</strong></div>) : <Typography.Text type="secondary">当前缓存未包含 normalization 数值</Typography.Text>}</div>
-            <div className="inspector-section"><div className="inspector-label">空间定位与匹配</div><Descriptions column={1} size="small">
-              <Descriptions.Item label="raster">{selectedSpot.raster}</Descriptions.Item>
-              <Descriptions.Item label="网格坐标">({spotNumber(selectedSpot.pre_x, 1)}, {spotNumber(selectedSpot.pre_y, 1)})</Descriptions.Item>
-              <Descriptions.Item label="采集后坐标">({spotNumber(selectedSpot.after_x, 1)}, {spotNumber(selectedSpot.after_y, 1)})</Descriptions.Item>
-              <Descriptions.Item label="原始采集坐标">({spotNumber(selectedSpot.original_x, 0)}, {spotNumber(selectedSpot.original_y, 0)})</Descriptions.Item>
-              <Descriptions.Item label="world 坐标">({spotNumber(selectedSpot.world_x, 3)}, {spotNumber(selectedSpot.world_y, 3)})</Descriptions.Item>
-              <Descriptions.Item label="点位匹配距离">{spotNumber(selectedSpot.distance_px, 2)} px</Descriptions.Item>
-              <Descriptions.Item label="图像响应分数">{spotNumber(selectedSpot.pit_score, 3)}</Descriptions.Item>
-              <Descriptions.Item label="校准版本">{selectedSpot.calibration_version ?? '—'}</Descriptions.Item>
+            <div className="spot-hero"><span className="spot-id">SPOT #{selectedSpot.spot_id}</span><Tag color={selectedSpot.detected ? 'success' : 'default'}><TranslatedText text={selectedSpot.detected ? t.workbench.spotDetected : t.workbench.spotCandidate} /></Tag><strong>{spotNumber(selectedSpot.value, 3)}</strong><small><TranslatedText text={selectedSpot.field_label ?? t.workbench.currentNormField} /></small></div>
+            <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.heatmapColorSample} /></div>{selectedSpot.raster === (mapping?.primary_raster ?? 0) && heatmapColors.has(selectedSpot.spot_id) ? <div className="inspector-value"><span><TranslatedText text={heatmap?.label || heatmap?.filename || t.workbench.heatmapPng} /></span><strong><span aria-hidden="true" style={{display: 'inline-block', width: 14, height: 14, background: heatmapColors.get(selectedSpot.spot_id), border: '1px solid currentColor', marginRight: 8, verticalAlign: 'middle'}} />{heatmapColors.get(selectedSpot.spot_id)}</strong></div> : <Typography.Text type="secondary"><TranslatedText text={t.workbench.noColorSample} /></Typography.Text>}</div>
+            <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.normValues} /></div>{selectedSpot.normalizations?.length ? selectedSpot.normalizations.map((value) => <div className={`inspector-value${value.key === (selectedSpot.field_key ?? selectedFieldKey) ? ' is-selected' : ''}`} key={value.key}><span>{value.label}</span><strong>{spotNumber(value.value, 3)}</strong></div>) : <Typography.Text type="secondary"><TranslatedText text={t.workbench.noNormValues} /></Typography.Text>}</div>
+            <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.spatialCoordInfo} /></div><Descriptions column={1} size="small">
+              <Descriptions.Item label={<TranslatedText text={t.workbench.rasterLabel} />}>{selectedSpot.raster}</Descriptions.Item>
+              <Descriptions.Item label={<TranslatedText text={t.workbench.gridCoord} />}>({spotNumber(selectedSpot.pre_x, 1)}, {spotNumber(selectedSpot.pre_y, 1)})</Descriptions.Item>
+              <Descriptions.Item label={<TranslatedText text={t.workbench.afterCoord} />}>({spotNumber(selectedSpot.after_x, 1)}, {spotNumber(selectedSpot.after_y, 1)})</Descriptions.Item>
+              <Descriptions.Item label={<TranslatedText text={t.workbench.originalCoord} />}>({spotNumber(selectedSpot.original_x, 0)}, {spotNumber(selectedSpot.original_y, 0)})</Descriptions.Item>
+              <Descriptions.Item label={<TranslatedText text={t.workbench.worldCoord} />}>({spotNumber(selectedSpot.world_x, 3)}, {spotNumber(selectedSpot.world_y, 3)})</Descriptions.Item>
+              <Descriptions.Item label={<TranslatedText text={t.workbench.regOffset} />}>{spotNumber(selectedSpot.distance_px, 2)} px</Descriptions.Item>
+              <Descriptions.Item label={<TranslatedText text={t.workbench.pitConfidence} />}>{spotNumber(selectedSpot.pit_score, 3)}</Descriptions.Item>
+              <Descriptions.Item label={<TranslatedText text={t.workbench.calibrationVer} />}>{selectedSpot.calibration_version ?? '—'}</Descriptions.Item>
             </Descriptions></div>
           </motion.div>
         )}
@@ -860,32 +885,32 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         open={reportOpen}
         mask={false}
         onClose={() => setReportOpen(false)}
-        title={<div className="drawer-title"><div><strong>配准报告</strong></div><button type="button" className="icon-button" onClick={() => setReportOpen(false)} aria-label="关闭配准报告"><CloseOutlined /></button></div>}
+        title={<div className="drawer-title"><div><strong><TranslatedText text={t.workbench.reportTitle} /></strong></div><button type="button" className="icon-button" onClick={() => setReportOpen(false)} aria-label={t.workbench.closeReport}><CloseOutlined /></button></div>}
       >
         <motion.div className="report-drawer-content" initial={{opacity: 0, x: 12}} animate={{opacity: 1, x: 0}} transition={{duration: reducedMotion ? 0 : .2}}>
         <div className="report-summary">
           <div className={`report-summary-icon${mappingSuccess ? ' is-success' : ' is-warning'}`}>{mappingSuccess ? <CheckCircleFilled /> : <SettingOutlined />}</div>
-          <div>{!mappingSuccess && <strong>结果需复核</strong>}<span>{mapping?.quality ?? '前后显微图区域级对齐'}</span></div>
+          <div>{!mappingSuccess && <strong><TranslatedText text={t.workbench.suggestReview} /></strong>}<span><TranslatedText text={qualityLabel(mapping?.quality, language)} /></span></div>
         </div>
-        <div className="report-metrics"><div><strong>{mapping?.mapped_spot_count?.toLocaleString() ?? '—'}</strong><span>映射点</span></div><div><strong>{autoPitTotal.toLocaleString()}</strong><span>已确认灼烧坑</span></div><div><strong>{Number.isFinite(opticalP95) ? `${opticalP95!.toFixed(2)} px` : '—'}</strong><span>光学验证误差 p95</span></div></div>
+        <div className="report-metrics"><div><strong>{mapping?.mapped_spot_count?.toLocaleString() ?? '—'}</strong><span><TranslatedText text={t.workbench.mappedSpotsMetric} /></span></div><div><strong>{autoPitTotal.toLocaleString()}</strong><span><TranslatedText text={t.workbench.confirmedPitsMetric} /></span></div><div><strong>{Number.isFinite(opticalP95) ? `${opticalP95!.toFixed(2)} px` : '—'}</strong><span><TranslatedText text={t.workbench.opticalP95} /></span></div></div>
         <Collapse className="report-collapse" ghost items={[
-          {key: 'data', label: '数据详情', children: <div className="report-detail-grid">
-            <div><span>显微来源</span><strong>{preSource.label || preSource.path || '—'}</strong></div>
-            <div><span>采集后来源</span><strong>{afterSource.label || afterSource.path || '—'}</strong></div>
-            <div><span>算法 / 方法</span><strong>{methodLabel(activeRegistration.method)}</strong></div>
-            <div><span>坐标模型</span><strong>{mapping?.coordinate_model ? `normalized_polynomial · degree ${mapping.coordinate_model.degree}` : '—'}</strong></div>
-            <div><span>校准版本</span><strong>{mapping?.calibration_version ?? '—'}</strong></div>
-            <div><span>主 Raster / 范围</span><strong>{mapping?.primary_raster ?? '—'} / {mapping?.mapped_spot_count?.toLocaleString() ?? '—'} 个映射点</strong></div>
-            <div><span>坐标链一致性 p95</span><strong>{Number.isFinite(chainP95) ? `${chainP95!.toFixed(3)} px · world→pre/after` : '—'}</strong></div>
-            <div><span>角点中位误差</span><strong>{typeof cornerMedian === 'number' && Number.isFinite(cornerMedian) ? `${cornerMedian.toFixed(2)} px · 区域级` : '—'}</strong></div>
+          {key: 'data', label: t.workbench.regParamsTab, children: <div className="report-detail-grid">
+            <div><span><TranslatedText text={t.workbench.preImage} /></span><strong>{preSource.label || preSource.path || '—'}</strong></div>
+            <div><span><TranslatedText text={t.workbench.afterImage} /></span><strong>{afterSource.label || afterSource.path || '—'}</strong></div>
+            <div><span><TranslatedText text={t.workbench.regAlgorithm} /></span><strong><TranslatedText text={methodLabel(activeRegistration.method, language)} /></strong></div>
+            <div><span><TranslatedText text={t.workbench.coordModel} /></span><strong>{mapping?.coordinate_model ? `normalized_polynomial · degree ${mapping.coordinate_model.degree}` : '—'}</strong></div>
+            <div><span><TranslatedText text={t.workbench.calibrationVer} /></span><strong>{mapping?.calibration_version ?? '—'}</strong></div>
+            <div><span><TranslatedText text={t.workbench.primaryRasterSpot(mapping?.primary_raster ?? '—', mapping?.mapped_spot_count?.toLocaleString() ?? '—')} /></span></div>
+            <div><span><TranslatedText text={t.workbench.coordConsistency(Number.isFinite(chainP95) ? `${chainP95!.toFixed(3)} px · world→pre/after` : '—')} /></span></div>
+            <div><span><TranslatedText text={t.workbench.cornerMedian(typeof cornerMedian === 'number' && Number.isFinite(cornerMedian) ? cornerMedian.toFixed(2) : '—')} /></span></div>
           </div>},
-          {key: 'validation', label: '验证预览', children: <div className="report-previews">
-            {artifact && <figure><img src={apiUrl(`/projects/${project.id}/validation/${artifact.replace(/^validation\//, '')}`)} alt="采集前与采集后叠加验证" /><figcaption>前后图像叠加 · 检查区域级对应关系</figcaption></figure>}
-            {pitArtifact && <figure><img src={apiUrl(`/projects/${project.id}/validation/${pitArtifact.replace(/^validation\//, '')}`)} alt="采集后显微图上的 SBD 灼烧坑检测" /><figcaption>自动灼烧坑检测 · {autoPitTotal.toLocaleString()} 个确认点</figcaption></figure>}
-            {regionArtifact && <figure><img src={apiUrl(`/projects/${project.id}/validation/${regionArtifact.replace(/^validation\//, '')}`)} alt="全幅网格五个固定区域复核" /><figcaption>全幅网格固定区域复核</figcaption></figure>}
-            {!artifact && !pitArtifact && !regionArtifact && <Typography.Text type="secondary">暂无验证预览</Typography.Text>}
+          {key: 'validation', label: t.workbench.validationTab, children: <div className="report-previews">
+            {artifact && <figure><img src={apiUrl(`/projects/${project.id}/validation/${artifact.replace(/^validation\//, '')}`)} alt={t.workbench.preAfterOverlay} /><figcaption><TranslatedText text={t.workbench.preAfterOverlayCaption} /></figcaption></figure>}
+            {pitArtifact && <figure><img src={apiUrl(`/projects/${project.id}/validation/${pitArtifact.replace(/^validation\//, '')}`)} alt={t.workbench.pitDetection} /><figcaption><TranslatedText text={t.workbench.pitDetectionCaption(autoPitTotal.toLocaleString())} /></figcaption></figure>}
+            {regionArtifact && <figure><img src={apiUrl(`/projects/${project.id}/validation/${regionArtifact.replace(/^validation\//, '')}`)} alt={t.workbench.regionValidation} /><figcaption><TranslatedText text={t.workbench.regionValidationCaption} /></figcaption></figure>}
+            {!artifact && !pitArtifact && !regionArtifact && <Typography.Text type="secondary"><TranslatedText text={t.workbench.noValidationPreview} /></Typography.Text>}
           </div>},
-          {key: 'limitations', label: '限制与数据含义', children: <ul className="report-limitations">{report.limitations.map((item) => <li key={item}>{limitationLabel(item)}</li>)}</ul>},
+          {key: 'limitations', label: t.workbench.limitationsTab, children: <ul className="report-limitations">{report.limitations.map((item) => <li key={item}><TranslatedText text={limitationLabel(item, language)} /></li>)}</ul>},
         ]} />
         </motion.div>
       </Drawer>

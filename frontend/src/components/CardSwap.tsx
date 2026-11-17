@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState, type ReactNode} from 'react';
 import {AnimatePresence, motion, useDragControls, useReducedMotion, type PanInfo} from 'motion/react';
+import {useI18n} from '../i18n';
 import './CardSwap.css';
 
 export type SwapCard = {id: string; label?: string; content: ReactNode};
@@ -46,8 +47,10 @@ export default function CardSwap({items, activeId, onChange}: {
       shift(info.offset.x < 0 ? 1 : -1, info.offset.x);
     }
   };
-  return <div className="history-card-carousel" role="region" aria-roledescription="轮播" aria-label="历史项目卡片">
-    <div className="card-swap" tabIndex={0} aria-label="使用左右方向键切换项目" onKeyDown={event => {
+  const {t} = useI18n();
+
+  return <div className="history-card-carousel" role="region" aria-roledescription={t.cardSwap.carousel} aria-label={t.cardSwap.cards}>
+    <div className="card-swap" tabIndex={0} aria-label={t.cardSwap.keyNavHint} onKeyDown={event => {
       if (event.target !== event.currentTarget) return;
       if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
         event.preventDefault();
@@ -61,7 +64,7 @@ export default function CardSwap({items, activeId, onChange}: {
         data-card-id={card.id}
         role={position > 0 ? 'button' : undefined}
         tabIndex={position > 0 ? 0 : undefined}
-        aria-label={position > 0 ? `将${card.label ?? '此项目'}移到最前面` : undefined}
+        aria-label={position > 0 ? t.cardSwap.bringToFront(card.label ?? '') : undefined}
         onClick={() => { if (position > 0) bringToFront(position); }}
         onKeyDown={event => {
           if (position > 0 && (event.key === 'Enter' || event.key === ' ')) {
@@ -104,9 +107,9 @@ export default function CardSwap({items, activeId, onChange}: {
       </AnimatePresence>
     </div>
     <div className="card-swap-navigation">
-      <button type="button" onClick={() => shift(-1)} disabled={items.length < 2} aria-label="上一个项目">←</button>
+      <button type="button" onClick={() => shift(-1)} disabled={items.length < 2} aria-label={t.cardSwap.prevProject}>←</button>
       <span aria-live="polite" aria-atomic="true">{items.length ? active + 1 : 0} / {items.length}</span>
-      <button type="button" onClick={() => shift(1)} disabled={items.length < 2} aria-label="下一个项目">→</button>
+      <button type="button" onClick={() => shift(1)} disabled={items.length < 2} aria-label={t.cardSwap.nextProject}>→</button>
     </div>
   </div>;
 }

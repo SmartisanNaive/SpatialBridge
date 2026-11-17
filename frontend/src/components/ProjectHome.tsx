@@ -1,8 +1,5 @@
-import './ProjectHome.css';
-import HistoryProjects from './HistoryProjects';
-import LetterGlitch from './LetterGlitch';
-import StatusMark, {type MarkStatus} from './StatusMark';
 import {useEffect, useRef, useState} from 'react';
+import './ProjectHome.css';
 import {Alert, Button, Card, Input, Layout, Progress, Space, Typography} from 'antd';
 import {
   SafetyOutlined,
@@ -12,6 +9,9 @@ import {
   PlayCircleOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
+import HistoryProjects from './HistoryProjects';
+import LetterGlitch from './LetterGlitch';
+import StatusMark, {type MarkStatus} from './StatusMark';
 import {projectName, projectStatusLabel} from '../flow';
 import {sha256Hex} from '../hash';
 import {compressionSupported, gzip, shouldCompress} from '../compress';
@@ -22,9 +22,11 @@ import {optimizePng} from '../png';
 import type {PngOptimization} from '../png';
 import type {Project, UploadRole, UploadSession} from '../types';
 import {apiUrl, apiFetch, errorText} from '../api';
+import {cachePreviewThumbnail, generateClientThumbnail} from '../utils';
+import {TranslatedText, useI18n, LanguageSwitch} from '../i18n';
 
 export const uploadRoleLabels: Record<UploadRole, string> = {
-  pre: '采集前显微图（PNG）', after: '采集后显微图（PNG）', sbd: 'SBD 数据（可选）',
+  pre: '采集前显微图 (PNG)', after: '采集后显微图 (PNG)', sbd: 'SBD 数据文件 (可选)',
   heatmap: 'MALDI 热图 (PNG)',
 };
 export const uploadRoleExtensions: Record<UploadRole, string[]> = {
@@ -73,6 +75,13 @@ export function ProjectHome({
   busy: boolean;
   error?: string;
 }) {
+  const {t, language} = useI18n();
+  const localizedRoleLabels: Record<UploadRole, string> = {
+    pre: t.home.rolePre,
+    after: t.home.roleAfter,
+    sbd: t.home.roleSbd,
+    heatmap: t.home.roleHeatmap,
+  };
   const emptySelection = (): Record<UploadRole, File[]> => ({pre: [], after: [], sbd: [], heatmap: []});
   const [selected, setSelected] = useState<Record<UploadRole, File[]>>(emptySelection);
   const [projectNameInput, setProjectNameInput] = useState('');
@@ -95,6 +104,141 @@ export function ProjectHome({
   const abortRef = useRef<AbortController | null>(null);
   const inputRefs = useRef<Partial<Record<UploadRole, HTMLInputElement | null>>>({});
 
+  interface SelectionAnimState {
+    status: MarkStatus;
+    progress?: number;
+    label: string;
+  }
+  const [selectionAnims, setSelectionAnims] = useState<Map<File, SelectionAnimState>>(new Map());
+  const selectionAnimTimers = useRef<Map<File, number[]>>(new Map());
+
+  interface VisualFileState {
+    percent: number;
+    done: boolean;
+  }
+  const [visualFileProgress, setVisualFileProgress] = useState<Record<string, VisualFileState>>({});
+  const visualAnimRefs = useRef<Record<string, number>>({});
+
+  const animateSelection = (file: File, delay = 0) => {
+    const existing = selectionAnimTimers.current.get(file);
+    if (existing) {
+      existing.forEach((id) => {
+        cancelAnimationFrame(id);
+        clearTimeout(id);
+      });
+    }
+    const timerIds: number[] = [];
+    selectionAnimTimers.current.set(file, timerIds);
+
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+      setSelectionAnims((prev) => new Map(prev).set(file, {status: 'done', label: t.home.animSelected}));
+      return;
+    }
+
+    const startAnim = () => {
+      const startTime = performance.now();
+      const duration = 750;
+
+      setSelectionAnims((prev) => new Map(prev).set(file, {
+        status: 'running',
+        progress: 0.05,
+        label: t.home.animReading,
+      }));
+
+      const tick = (now: number) => {
+        const elapsed = now - startTime;
+        const timeFraction = Math.min(1, Math.max(0, elapsed / duration));
+        const eased = 1 - Math.pow(1 - timeFraction, 3);
+
+        if (timeFraction < 1) {
+          const p = Math.max(0.05, Math.min(0.99, eased));
+          setSelectionAnims((prev) => new Map(prev).set(file, {
+            status: 'running',
+            progress: p,
+            label: p > 0.6 ? t.home.animValidating : t.home.animReading,
+          }));
+          const raf = requestAnimationFrame(tick);
+          timerIds.push(raf);
+        } else {
+          setSelectionAnims((prev) => new Map(prev).set(file, {
+            status: 'running',
+            progress: 1,
+            label: t.home.animValidationComplete,
+          }));
+          const timer = window.setTimeout(() => {
+            setSelectionAnims((prev) => new Map(prev).set(file, {
+              status: 'done',
+              label: t.home.animSelected,
+            }));
+          }, 180);
+          timerIds.push(timer);
+        }
+      };
+
+      const raf = requestAnimationFrame(tick);
+      timerIds.push(raf);
+    };
+
+    if (delay > 0) {
+      const delayTimer = window.setTimeout(startAnim, delay);
+      timerIds.push(delayTimer);
+    } else {
+      startAnim();
+    }
+  };
+
+  useEffect(() => {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    for (const [id, target] of Object.entries(fileProgress)) {
+      const current = visualFileProgress[id]?.percent ?? 0;
+      if (reduce) {
+        setVisualFileProgress((prev) => ({
+          ...prev,
+          [id]: {percent: target, done: target >= 100},
+        }));
+        continue;
+      }
+      if (target > current) {
+        if (visualAnimRefs.current[id]) {
+          cancelAnimationFrame(visualAnimRefs.current[id]);
+        }
+        const startVal = current;
+        const startTime = performance.now();
+        const duration = Math.max(350, ((target - startVal) / 100) * 650);
+
+        const step = (now: number) => {
+          const elapsed = now - startTime;
+          const progressFraction = Math.min(1, elapsed / duration);
+          const eased = 1 - Math.pow(1 - progressFraction, 3);
+          const nextVal = Math.round(startVal + (target - startVal) * eased);
+
+          if (progressFraction < 1) {
+            setVisualFileProgress((prev) => ({
+              ...prev,
+              [id]: {percent: nextVal, done: false},
+            }));
+            visualAnimRefs.current[id] = requestAnimationFrame(step);
+          } else {
+            setVisualFileProgress((prev) => ({
+              ...prev,
+              [id]: {percent: target, done: false},
+            }));
+            if (target >= 100) {
+              window.setTimeout(() => {
+                setVisualFileProgress((prev) => ({
+                  ...prev,
+                  [id]: {percent: 100, done: true},
+                }));
+              }, 200);
+            }
+          }
+        };
+        visualAnimRefs.current[id] = requestAnimationFrame(step);
+      }
+    }
+  }, [fileProgress]);
+
   useEffect(() => {
     const active = new Set([...selected.pre, ...selected.after, ...selected.heatmap]);
     setImageOptimizations((current) => Array.from(current.keys()).every((file) => active.has(file))
@@ -110,10 +254,10 @@ export function ProjectHome({
         setProjectNameInput(value.project_name ?? '');
         setFileProgress(Object.fromEntries(value.files.map((file) => [file.id, file.size ? Math.round(file.uploaded_size / file.size * 100) : 0])));
         setUploadStatus(value.status === 'assembling'
-          ? '服务器正在合并上次上传的文件。请重新选择相同文件后查看进度。'
+          ? t.home.sessionAssemblingNotice
           : value.status === 'failed'
-            ? '上次文件合并中断。请重新选择相同文件后重试，已上传分片会保留。'
-            : '发现未完成的上传。请重新选择相同文件后即可继续。');
+            ? t.home.sessionInterruptedNotice
+            : t.home.sessionUnfinishedNotice);
         if (value.error) setUploadError(value.error);
       } else if (value.completed_project_id) {
         const project = await apiFetch<Project>(`/projects/${encodeURIComponent(value.completed_project_id)}`);
@@ -128,14 +272,35 @@ export function ProjectHome({
   const addFiles = (role: UploadRole, incoming: File[]) => {
     const accepted = incoming.filter((file) => uploadRoleExtensions[role].includes(`.${file.name.split('.').pop()?.toLowerCase() ?? ''}`) && file.size > 0);
     if (!accepted.length) {
-      setUploadError(`${uploadRoleLabels[role]}格式不正确或文件为空。`);
+      setUploadError(t.home.formatNotSupported(localizedRoleLabels[role]));
       return;
     }
     setUploadError('');
     setSelected((current) => ({...current, [role]: role === 'heatmap' ? [...current[role], ...accepted] : [accepted[0]]}));
+    accepted.forEach((file, idx) => {
+      animateSelection(file, idx * 80);
+    });
   };
 
-  const removeFile = (role: UploadRole, index: number) => setSelected((current) => ({...current, [role]: current[role].filter((_, itemIndex) => itemIndex !== index)}));
+  const removeFile = (role: UploadRole, index: number) => {
+    const fileToRemove = selected[role][index];
+    if (fileToRemove) {
+      const timers = selectionAnimTimers.current.get(fileToRemove);
+      if (timers) {
+        timers.forEach((id) => {
+          cancelAnimationFrame(id);
+          clearTimeout(id);
+        });
+        selectionAnimTimers.current.delete(fileToRemove);
+      }
+      setSelectionAnims((current) => {
+        const next = new Map(current);
+        next.delete(fileToRemove);
+        return next;
+      });
+    }
+    setSelected((current) => ({...current, [role]: current[role].filter((_, itemIndex) => itemIndex !== index)}));
+  };
   const prepareFile = (role: UploadRole, file: File) => role === 'sbd'
     ? (sbdExtraction?.source === file ? sbdExtraction.result.file : file)
     : (imageOptimizations.get(file)?.file ?? file);
@@ -149,49 +314,73 @@ export function ProjectHome({
   const legacySbdSession = !!session?.files.some((file) => file.role === 'sbd' && file.filename.toLowerCase().endsWith('.sbd'));
   const canStart = selected.pre.length === 1 && selected.after.length === 1 && !uploading && !busy && !legacySbdSession;
 
-  const fileStatus = (percent: number | undefined): {status: MarkStatus; label: string; progress?: number} => {
-    if (uploadCompleted || percent != null && percent >= 100) return {status: 'done', label: '已上传'};
-    if (percent == null) return {status: 'done', label: '已选择'};
-    if (uploadError) return {status: 'failed', label: '上传中断'};
-    if (paused) return {status: 'paused', label: '已暂停'};
-    if (uploading && !extracting) return {status: 'running', label: '上传中', progress: percent / 100};
-    return {status: 'pending', label: '等待上传'};
+  const fileStatus = (
+    file: File,
+    percent: number | undefined,
+    isDoneUpload: boolean,
+  ): {status: MarkStatus; label: string; progress?: number} => {
+    if (uploadCompleted || isDoneUpload) return {status: 'done', label: t.home.animUploaded};
+    if (uploadError) return {status: 'failed', label: t.home.animInterrupted};
+    if (paused) return {status: 'paused', label: t.home.animPaused};
+    if (uploading) {
+      if (extracting) return {status: 'running', label: t.home.animExtracting};
+      return {
+        status: 'running',
+        label: percent != null && percent >= 100 ? t.home.animUploadDone : t.home.animUploading,
+        progress: percent != null ? percent / 100 : undefined,
+      };
+    }
+
+    const anim = selectionAnims.get(file);
+    if (anim) {
+      return {
+        status: anim.status,
+        label: anim.label,
+        progress: anim.status === 'running' ? anim.progress : undefined,
+      };
+    }
+
+    if (percent == null) return {status: 'done', label: t.home.animSelected};
+    return {status: 'pending', label: t.home.animPendingUpload};
   };
   const overallStatus: MarkStatus = uploadCompleted ? 'done' : uploadError ? 'failed'
     : paused ? 'paused' : cancelRef.current ? 'cancelled' : 'running';
 
   const waitIfPaused = async () => {
     while (pauseRef.current && !cancelRef.current) await new Promise<void>((resolve) => window.setTimeout(resolve, 180));
-    if (cancelRef.current) throw new Error('上传已取消');
+    if (cancelRef.current) throw new Error(t.home.uploadStatusCancelled);
   };
 
   const finishUpload = async (uploadId: string) => {
-    setUploadStatus('正在服务器校验并合并文件…');
+    setUploadStatus(t.home.uploadStatusAssembling);
     const started = await apiFetch<UploadSession | Project>(`/uploads/${encodeURIComponent(uploadId)}/complete?background=true`, {method: 'POST'});
     if (!('files' in started)) return started;
     setSession(started);
     while (!cancelRef.current) {
       const remote = await apiFetch<UploadSession>(`/uploads/${encodeURIComponent(uploadId)}`);
-      if (remote.status === 'failed') throw new Error(remote.error || '文件合并失败，请重新尝试。');
+      if (remote.status === 'failed') throw new Error(remote.error || t.home.uploadStatusAssemblyFailed);
       if (remote.status === 'completed' && remote.completed_project_id) {
         return apiFetch<Project>(`/projects/${encodeURIComponent(remote.completed_project_id)}`);
       }
       await new Promise<void>((resolve) => window.setTimeout(resolve, 1200));
     }
-    throw new Error('上传已取消');
+    throw new Error(t.home.uploadStatusCancelled);
   };
 
   const cancelUpload = async () => {
     cancelRef.current = true;
     pauseRef.current = false;
     abortRef.current?.abort();
+    Object.values(visualAnimRefs.current).forEach((raf) => cancelAnimationFrame(raf));
+    visualAnimRefs.current = {};
+    setVisualFileProgress({});
     const current = session;
     if (current?.status === 'pending' || current?.status === 'failed') {
       try {
         await apiFetch(`/uploads/${encodeURIComponent(current.id)}`, {method: 'DELETE'});
       } catch (error) {
-        setUploadError(errorText(error));
-        setUploadStatus('取消未完成，请重试；上传会话仍然保留。');
+        setUploadError(errorText(error, language));
+        setUploadStatus(t.home.uploadStatusCancelNotFinished);
         return;
       }
     }
@@ -200,22 +389,32 @@ export function ProjectHome({
     setProjectNameInput('');
     setUploading(false);
     setPaused(false);
-    setUploadStatus('上传已取消。');
+    setUploadStatus(t.home.uploadStatusCancelled);
     setUploadedBytes(0);
     setFileProgress({});
   };
 
   const showUploadComplete = async (project: Project) => {
+    // Generate low-weight client thumbnail strictly for the loading/refining preview
+    if (selected.pre[0]) {
+      try {
+        const thumbUrl = await generateClientThumbnail(selected.pre[0], 640);
+        cachePreviewThumbnail(project.id, thumbUrl);
+      } catch {
+        // Fallback to backend thumbnail
+      }
+    }
     // Server work is finished; each pause only lets the mark finish its animation.
-    setUploadStatus('文件上传完成');
+    setUploadStatus(t.home.uploadStatusComplete);
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (!reduce) {
-      await new Promise<void>(resolve => window.setTimeout(resolve, 700));
+      await new Promise<void>(resolve => window.setTimeout(resolve, 800));
       setUploadCompleted(true);
       await new Promise<void>(resolve => window.setTimeout(resolve, 1500));
     }
     setSession(null);
     setFileProgress({});
+    setVisualFileProgress({});
     onProject(project);
   };
 
@@ -223,7 +422,7 @@ export function ProjectHome({
     if (!canStart) return;
     setUploadCompleted(false);
     setUploadError('');
-    setUploadStatus('准备上传…');
+    setUploadStatus(t.home.uploadStatusPreparing);
     setUploadedBytes(0);
     setTotalBytes(0);
     cancelRef.current = false;
@@ -235,12 +434,21 @@ export function ProjectHome({
       if (selected.sbd.length) {
         const source = selected.sbd[0];
         setExtracting(true);
-        setUploadStatus('正在本地读取 SBD 索引…');
+        setUploadStatus(t.home.uploadStatusParsingSbd);
         abortRef.current = new AbortController();
         const cached = extractionRef.current?.source === source ? extractionRef.current.result : null;
         const result = cached ?? await extractSbd(source, {
           signal: abortRef.current.signal,
-          onProgress: ({stage}) => setUploadStatus(stage),
+          onProgress: ({stage, completed, total}) => {
+            if (language === 'en') {
+              if (stage.includes('目录结构')) setUploadStatus('Parsing SBD directory structure…');
+              else if (stage.includes('提取 SBD 数据')) setUploadStatus(`Extracting SBD data (${completed + 1}/${total})…`);
+              else if (stage.includes('校验')) setUploadStatus('Verifying extracted data…');
+              else setUploadStatus(stage);
+            } else {
+              setUploadStatus(stage);
+            }
+          },
         });
         if (cancelRef.current) return;
         extractionRef.current = {source, result};
@@ -256,13 +464,13 @@ export function ProjectHome({
       for (const role of ['pre', 'after', 'heatmap'] as const) {
         uploadSelection[role] = [];
         for (const source of selected[role]) {
-          setUploadStatus(`正在本地检查并无损优化图片：${source.name}`);
+          setUploadStatus(t.home.uploadStatusCheckingPng(source.name));
           // Resume older sessions with their original PNG bytes and chunk hashes.
           const resumeOriginal = session?.files.some((file) => file.role === role && file.filename === source.name && file.size === source.size);
           const result = resumeOriginal ? {file: source, reason: 'unchanged' as const}
             : imageCache.current.get(source) ?? await optimizePng(source, {
               signal: abortRef.current.signal,
-              onProgress: (bytes) => setUploadStatus(`正在本地无损优化 ${source.name}，已处理 ${(bytes / 1024 / 1024).toFixed(0)} MB 图像数据…`),
+              onProgress: (bytes) => setUploadStatus(t.home.uploadStatusOptimizingPng(source.name, (bytes / 1024 / 1024).toFixed(0))),
             });
           if (cancelRef.current) return;
           if (!resumeOriginal) imageCache.current.set(source, result);
@@ -302,7 +510,7 @@ export function ProjectHome({
       const used = new Set<number>();
       const matchingFiles = currentSession.files.map((remote) => {
         const index = uploadFiles.findIndex((item, itemIndex) => !used.has(itemIndex) && item.role === remote.role && item.file.name === remote.filename && item.file.size === remote.size);
-        if (index < 0) throw new Error(`请重新选择上传文件：${remote.filename}`);
+        if (index < 0) throw new Error(t.home.selectMatchingFile(remote.filename));
         used.add(index);
         return {remote, local: uploadFiles[index].file};
       });
@@ -352,7 +560,7 @@ export function ProjectHome({
               });
               if (!response.ok) {
                 const payload = await response.json().catch(() => ({}));
-                throw new Error(payload.detail || `分片上传失败（${response.status}）`);
+                throw new Error(payload.detail || (language === 'en' ? `Chunk upload failed (${response.status})` : `分片上传失败（${response.status}）`));
               }
               if (compression) {
                 compression = {...compression, networkBytesPerSecond: body.byteLength / Math.max((performance.now() - sendStarted) / 1000, 1e-3)};
@@ -361,27 +569,26 @@ export function ProjectHome({
               break;
             } catch (error) {
               lastError = error;
-              if (cancelRef.current) throw new Error('上传已取消');
+              if (cancelRef.current) throw new Error(t.home.uploadStatusCancelled);
               if (attempt < 2) await new Promise<void>((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
             }
           }
-          if (!chunkUploaded) throw lastError instanceof Error ? lastError : new Error('分片上传失败，请稍后继续');
+          if (!chunkUploaded) throw lastError instanceof Error ? lastError : new Error(t.home.chunkUploadFailed);
           completedBytes += chunk.size;
           setUploadedBytes(completedBytes);
           setFileProgress((current) => ({...current, [remote.id]: Math.min(100, Math.round((start + chunk.size) / local.size * 100))}));
-          setUploadStatus(`正在上传 ${remote.filename}（${index + 1}/${remote.total_chunks}）`);
+          setUploadStatus(t.home.uploadStatusUploadingChunk(remote.filename, index + 1, remote.total_chunks));
         }
       }
       const project = await finishUpload(currentSession.id);
       window.localStorage.removeItem(uploadSessionStorageKey);
-      setSession(null);
       await showUploadComplete(project);
     } catch (error) {
       if (!cancelRef.current) {
         setPaused(true);
         pauseRef.current = true;
-        setUploadError(errorText(error));
-        setUploadStatus('本次上传或文件合并未完成，可重新选择相同文件后继续。');
+        setUploadError(errorText(error, language));
+        setUploadStatus(t.home.uploadStatusIncomplete);
       }
     } finally {
       abortRef.current = null;
@@ -390,48 +597,76 @@ export function ProjectHome({
     }
   };
 
+
   return (
     <Layout className="app project-home-app">
       <LetterGlitch />
       <header className="home-header">
-        <div className="home-brand"><img className="brand-logo small" src="/spatialbridge-logo.png" alt="SpatialBridge logo" /><div><strong>SpatialBridge</strong><span>显微图与 MALDI 空间配准</span></div></div>
-        <div className="home-header-meta"><span className="status-dot" />共享项目</div>
+        <div className="home-brand">
+          <img className="brand-logo small" src="/spatialbridge-logo.png" alt="SpatialBridge logo" />
+          <div>
+            <strong>SpatialBridge</strong>
+            <span><TranslatedText text={t.home.brandSubtitle} /></span>
+          </div>
+        </div>
+        <div className="home-header-meta">
+          <LanguageSwitch />
+        </div>
       </header>
       <main className="project-home">
         <section className="home-intro">
-          <Typography.Title>从一个项目开始</Typography.Title>
-          <Typography.Paragraph>上传采集前后显微图，生成可复核的空间坐标工作台。</Typography.Paragraph>
-          {currentProject && <div className="home-current"><div><span>当前项目 · {projectStatusLabel(currentProject.status)}</span><strong>{projectName(currentProject)}</strong></div><Button size="small" disabled={busy || uploading} onClick={() => onOpen(currentProject)}>继续当前项目</Button></div>}
+          <Typography.Title><TranslatedText text={t.home.heroTitle} /></Typography.Title>
+          <Typography.Paragraph><TranslatedText text={t.home.heroDesc} /></Typography.Paragraph>
+          {currentProject && <div className="home-current"><div><span><TranslatedText text={t.home.currentProjectPrefix} /><TranslatedText text={projectStatusLabel(currentProject.status, language)} /></span><strong><TranslatedText text={projectName(currentProject, language)} /></strong></div><Button size="small" disabled={busy || uploading} onClick={() => onOpen(currentProject)}><TranslatedText text={t.home.enterCurrentProject} /></Button></div>}
         </section>
         <div className={`home-grid${projects.length ? '' : ' is-empty'}`}>
           <Card className="home-import-card" variant="borderless">
-            <div className="home-card-kicker">新建项目</div>
-            <Typography.Title level={3}>上传项目文件</Typography.Title>
-            <Typography.Text type="secondary">采集前和采集后 PNG 必填；SBD 和热图可选。SBD 会先在本机提取配准所需数据；PNG 自动尝试无损优化，已充分压缩的图片直接上传。像素、尺寸和原始文件保持不变。文件分片上传，网络中断后可以继续。</Typography.Text>
-            <Input aria-label="项目名称" value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} placeholder="自定义项目名称（留空则使用创建时间戳）" maxLength={200} disabled={uploading || busy || !!session} />
+            <div className="home-card-kicker"><TranslatedText text={t.home.newProject} /></div>
+            <Typography.Title level={3}><TranslatedText text={t.home.uploadTitle} /></Typography.Title>
+            <Typography.Text type="secondary"><TranslatedText text={t.home.uploadDesc} /></Typography.Text>
+            <Input aria-label={t.workbench.projectName} value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} placeholder={t.home.projectNamePlaceholder} maxLength={200} disabled={uploading || busy || !!session} />
             <div className="upload-file-pickers">
               {uploadRoles.map((role) => <div className="upload-file-picker" key={role}>
                 <input ref={(element) => {inputRefs.current[role] = element;}} type="file" accept={uploadRoleExtensions[role].join(',')} multiple={role === 'heatmap'} hidden onChange={(event) => {addFiles(role, Array.from(event.target.files ?? [])); event.currentTarget.value = '';}} />
-                <div className="upload-picker-heading"><span>{uploadRoleLabels[role]}</span><Button size="small" icon={<UploadOutlined />} disabled={uploading || busy} onClick={() => inputRefs.current[role]?.click()}>选择</Button></div>
+                <div className="upload-picker-heading"><span><TranslatedText text={localizedRoleLabels[role]} /></span><Button size="small" icon={<UploadOutlined />} disabled={uploading || busy} onClick={() => inputRefs.current[role]?.click()}><TranslatedText text={t.common.selectFile} /></Button></div>
                 {selected[role].length > 0 ? <div className="upload-selected-list">{selected[role].map((file, index) => {
                   const preparedFile = prepareFile(role, file);
                   const remote = session?.files.find((item) => item.role === role && item.filename === preparedFile.name && item.size === preparedFile.size);
-                  const percent = remote ? (fileProgress[remote.id] ?? 0) : undefined;
-                  const mark = fileStatus(percent);
-                  return <div className="upload-selected-file" key={`${file.name}-${file.size}-${index}`}><div className="upload-selected-file-main"><div style={{display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}><StatusMark status={mark.status} progress={mark.progress} size={16} /><span title={file.name} style={{fontWeight: 500}}>{file.name}</span><span className="upload-file-state" data-status={mark.status}>{mark.label}</span></div>{percent != null && <Progress percent={percent} size="small" showInfo={false} strokeColor="#2d6a5b" />}</div><Button type="text" size="small" disabled={uploading} onClick={() => removeFile(role, index)}>移除</Button></div>;
-                })}</div> : <StatusMark className="upload-empty" status="pending" size={14} fontSize={10} label="尚未选择" />}
+                  const visual = remote ? visualFileProgress[remote.id] : undefined;
+                  const percent = visual?.percent ?? (remote ? (fileProgress[remote.id] ?? 0) : undefined);
+                  const isDoneUpload = visual?.done ?? (uploadCompleted || (percent != null && percent >= 100));
+                  const mark = fileStatus(file, percent, isDoneUpload);
+                  const opt = imageOptimizations.get(file);
+                  const sizeDiff = opt && opt.file.size < file.size ? Math.round((1 - opt.file.size / file.size) * 100) : 0;
+
+                  return (
+                    <div className="upload-selected-file" key={`${file.name}-${file.size}-${index}`}>
+                      <div className="upload-selected-file-main">
+                        <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                          <StatusMark status={mark.status} progress={mark.progress} size={16} />
+                          <span title={file.name} style={{fontWeight: 500}}>{file.name}</span>
+                          <span style={{color: '#8c9c96', fontSize: 10}}>{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                          <span className="upload-file-state" data-status={mark.status}><TranslatedText text={mark.label} /></span>
+                          {sizeDiff > 0 && <span className="lens-tag"><TranslatedText text={t.home.optimizedSaving(sizeDiff)} /></span>}
+                        </div>
+                        {percent != null && <Progress percent={percent} size="small" showInfo={false} strokeColor="#2d6a5b" />}
+                      </div>
+                      <Button type="text" size="small" disabled={uploading} onClick={() => removeFile(role, index)}><TranslatedText text={t.common.remove} /></Button>
+                    </div>
+                  );
+                })}</div> : <StatusMark className="upload-empty" status="pending" size={14} fontSize={10} label={t.home.noFileSelected} />}
               </div>)}
             </div>
-            {sbdExtraction && sbdExtraction.source === selected.sbd[0] && <Typography.Paragraph type="secondary">SBD 已在本地提取：{(sbdExtraction.result.stats.sourceBytes / 1024 / 1024).toFixed(1)} MB → {(sbdExtraction.result.file.size / 1024 / 1024).toFixed(1)} MB，仅上传精简数据。</Typography.Paragraph>}
-            {checkedImages.length > 0 && <Typography.Paragraph type="secondary">{optimizedImageBytes < originalImageBytes
-              ? `图片已无损优化：${(originalImageBytes / 1024 / 1024).toFixed(1)} MB → ${(optimizedImageBytes / 1024 / 1024).toFixed(1)} MB，像素与尺寸保持不变。`
-              : '图片检查完成，复用原图上传；已压缩或重压无收益的图片不重复处理。'}</Typography.Paragraph>}
-            {session && <Alert type="info" showIcon message="发现可恢复的上传会话" description={legacySbdSession ? '这是旧版完整 SBD 上传。请先点击“取消上传”释放该会话的数据，再重新开始，改用本地精简上传。' : uploadSessionMatches(session, preparedSelection) ? '已匹配本地文件，可以继续上传。' : '请重新选择与上次相同的文件；SBD 会在本地重新提取后匹配上传会话。'} />}
-            {(extracting || uploading || uploadedBytes > 0 || (session && uploadStatus)) && <div className="upload-progress-block" role="status">
+            {sbdExtraction && sbdExtraction.source === selected.sbd[0] && <Typography.Paragraph type="secondary"><TranslatedText text={t.home.sbdExtractionSummary((sbdExtraction.result.stats.sourceBytes / 1024 / 1024).toFixed(1), (sbdExtraction.result.file.size / 1024 / 1024).toFixed(1))} /></Typography.Paragraph>}
+            {checkedImages.length > 0 && <Typography.Paragraph type="secondary"><TranslatedText text={optimizedImageBytes < originalImageBytes
+              ? t.home.pngOptimizationSummary((originalImageBytes / 1024 / 1024).toFixed(1), (optimizedImageBytes / 1024 / 1024).toFixed(1))
+              : t.home.pngOptimizationSkipped} /></Typography.Paragraph>}
+            {session && <Alert type="info" showIcon message={<TranslatedText text={t.home.sessionDetectedTitle} />} description={<TranslatedText text={legacySbdSession ? t.home.sessionLegacy : uploadSessionMatches(session, preparedSelection) ? t.home.sessionMatched : t.home.sessionReselect} />} />}
+            {(extracting || uploading || uploadedBytes > 0 || (session && uploadStatus) || cancelRef.current && uploadStatus) && <div className="upload-progress-block" role="status">
               <div className="upload-progress-heading">
                 <StatusMark status={overallStatus} progress={!extracting && totalBytes > 0 ? Math.min(1, uploadedBytes / totalBytes) : undefined}
-                  size={20} label={uploadStatus || '准备上传…'} />
-                {!extracting && totalBytes > 0 && <span className="upload-progress-percent">文件已上传 {Math.min(100, Math.round(uploadedBytes / totalBytes * 100))}%</span>}
+                  size={20} label={uploadStatus || t.home.uploadStatusPreparing} />
+                {!extracting && totalBytes > 0 && <span className="upload-progress-percent"><TranslatedText text={t.home.uploadProgressPercent(Math.min(100, Math.round(uploadedBytes / totalBytes * 100)))} /></span>}
               </div>
               {!extracting && totalBytes > 0 && <>
                 <Progress percent={Math.min(100, Math.round(uploadedBytes / totalBytes * 100))} showInfo={false}
@@ -440,14 +675,14 @@ export function ProjectHome({
               </>}
             </div>}
             <Space wrap className="home-actions">
-              <Button type="primary" onClick={startUpload} disabled={!canStart} loading={uploading && !paused && !uploadCompleted}>{uploadCompleted ? '上传完成' : '开始上传并处理'}</Button>
-              {uploading && !extracting && session && session.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}>{paused ? '继续上传' : '暂停上传'}</Button>}
-              {!uploading && paused && session && <Button icon={<PlayCircleOutlined />} onClick={startUpload}>继续上传</Button>}
-              {(extracting || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}>{extracting ? '取消本地处理' : '取消上传'}</Button>}
-              {demoAvailable && <Button onClick={onDemo} disabled={busy || uploading}>载入内置示例</Button>}
+              <Button type="primary" onClick={startUpload} disabled={!canStart} loading={uploading && !paused && !uploadCompleted}><TranslatedText text={uploadCompleted ? t.home.btnUploadComplete : t.home.btnStartUpload} /></Button>
+              {uploading && !extracting && session && session.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}><TranslatedText text={paused ? t.home.btnResumeUpload : t.home.btnPauseUpload} /></Button>}
+              {!uploading && paused && session && <Button icon={<PlayCircleOutlined />} onClick={startUpload}><TranslatedText text={t.home.btnResumeUpload} /></Button>}
+              {(extracting || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}><TranslatedText text={extracting ? t.home.btnCancelExtract : t.home.btnCancelUpload} /></Button>}
+              {demoAvailable && <Button onClick={onDemo} disabled={busy || uploading}><TranslatedText text={t.home.btnLoadDemo} /></Button>}
             </Space>
-            {(error || uploadError) && <Alert type="error" showIcon message="项目请求失败" description={error || uploadError} />}
-            <div className="home-notes"><span><SafetyOutlined />来源文件只读</span><span><AimOutlined />自动建立空间坐标</span><span><HistoryOutlined />支持断点续传</span></div>
+            {(error || uploadError) && <Alert type="error" showIcon message={<TranslatedText text={t.common.operationFailed} />} description={error || uploadError} />}
+            <div className="home-notes"><span><SafetyOutlined /><TranslatedText text={t.home.featureIntegrity} /></span><span><AimOutlined /><TranslatedText text={t.home.featureMapping} /></span><span><HistoryOutlined /><TranslatedText text={t.home.featurePersistence} /></span></div>
           </Card>
           <HistoryProjects projects={projects} onOpen={onOpen} onRetry={onRetry} busy={busy} />
         </div>

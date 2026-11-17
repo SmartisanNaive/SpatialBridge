@@ -1,61 +1,183 @@
-import {type CSSProperties, type ReactNode} from 'react';
-import {motion, useReducedMotion} from 'motion/react';
+import {useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode} from 'react';
+import {animate, useMotionValue, useReducedMotion} from 'motion/react';
+import {TranslatedText, useI18n} from '../i18n';
 import './StatusMark.css';
 
-export type MarkStatus = 'pending' | 'running' | 'done' | 'failed' | 'paused' | 'cancelled';
+export type MarkStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused';
 
-const TEXT: Record<MarkStatus, string> = {
-  pending: '等待中', running: '进行中', done: '已完成', failed: '失败', paused: '已暂停', cancelled: '已取消',
-};
+const UI = {type: 'spring', duration: 0.3, bounce: 0} as const;
+const MORPH = {duration: 0.3, ease: [0.77, 0, 0.175, 1]} as const;
+const CHECK = 'M7.5 12.25 10.5 15.25 16.75 8.75';
+const CROSS = 'M8.5 8.5 15.5 15.5M15.5 8.5 8.5 15.5';
+const IDLE_DASH = 0.3;
 
-/** A quiet status glyph: dashed idle ring, progress ring, drawn check or cross, pause bars. */
-export default function StatusMark({status = 'pending', progress, label, size = 18, fontSize = 12, className = ''}: {
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+export interface StatusMarkProps {
   status?: MarkStatus;
-  /** A fraction between zero and one; omit when progress cannot be measured. */
   progress?: number;
   label?: ReactNode;
+  color?: string;
+  doneColor?: string;
+  errorColor?: string;
   size?: number;
+  strokeWidth?: number;
+  dashes?: number;
   fontSize?: number;
+  spinDuration?: number;
+  arcLength?: number;
+  drawDuration?: number;
+  fillOpacity?: number;
+  strike?: boolean;
+  strikeDelay?: number;
   className?: string;
-}) {
+  style?: CSSProperties;
+}
+
+export default function StatusMark({
+  status = 'pending',
+  progress,
+  label,
+  color = 'currentColor',
+  doneColor = 'var(--green, #2d6a5b)',
+  errorColor = '#ef4444',
+  size = 18,
+  strokeWidth = 2,
+  dashes = 8,
+  fontSize = 12,
+  spinDuration = 1100,
+  arcLength = 0.68,
+  drawDuration = 240,
+  fillOpacity = 0.06,
+  strike = false,
+  strikeDelay = 60,
+  className = '',
+  style,
+}: StatusMarkProps) {
   const reduce = useReducedMotion();
+  const r = 10 - strokeWidth / 2;
+  const C = 2 * Math.PI * r;
+  const P = C / Math.max(1, dashes);
   const determinate = status === 'running' && typeof progress === 'number' && Number.isFinite(progress);
-  const value = determinate ? Math.max(0, Math.min(1, progress)) : undefined;
   const indeterminate = status === 'running' && !determinate;
-  const crossed = status === 'failed' || status === 'cancelled';
-  const circumference = 2 * Math.PI * 9;
-  const arc = indeterminate ? .68 : value ?? 1;
-  const dash = status === 'pending' || status === 'cancelled'
-    ? circumference / 8 * .3 : circumference * arc;
-  const gap = status === 'pending' || status === 'cancelled'
-    ? circumference / 8 * .7 : circumference * (1 - arc);
+  const solid = status === 'running' || status === 'done' || status === 'failed' || status === 'paused';
+  const targetArc = indeterminate ? arcLength : determinate ? clamp01(progress!) : 1;
+
+  const mode = useMotionValue(solid ? 1 : 0);
+  const arc = useMotionValue(targetArc);
+  const travel = useMotionValue(0);
+  const ringRef = useRef<SVGCircleElement | null>(null);
+  const geo = useRef({C, P});
+  geo.current = {C, P};
+  const gen = useRef(0);
+
+  const writeDash = () => {
+    const g = geo.current;
+    const m = mode.get();
+    const a = arc.get();
+    const dash = IDLE_DASH * g.P + (a * g.C - IDLE_DASH * g.P) * m;
+    const gap = (1 - IDLE_DASH) * g.P + ((1 - a) * g.C - (1 - IDLE_DASH) * g.P) * m;
+    ringRef.current?.setAttribute('stroke-dasharray', `${Math.max(0, dash)} ${Math.max(0, gap)}`);
+  };
+
+  useLayoutEffect(() => {
+    writeDash();
+    ringRef.current?.setAttribute('stroke-dashoffset', String(travel.get()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [C, P]);
+
+  useEffect(() => {
+    const offs = [
+      mode.on('change', writeDash),
+      arc.on('change', writeDash),
+      travel.on('change', (v) => ringRef.current?.setAttribute('stroke-dashoffset', String(v))),
+    ];
+    return () => {
+      offs.forEach((off) => off());
+      mode.stop();
+      arc.stop();
+      travel.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const g = ++gen.current;
+    if (reduce) {
+      mode.jump(solid ? 1 : 0);
+      arc.jump(targetArc);
+      travel.jump(0);
+      return;
+    }
+    if (mode.get() === 0) arc.jump(targetArc);
+    animate(mode, solid ? 1 : 0, MORPH);
+    animate(arc, targetArc, UI);
+    if (indeterminate) {
+      const t0 = travel.get();
+      animate(travel, [t0, t0 - C], {duration: spinDuration / 1000, ease: 'linear', repeat: Infinity});
+      return;
+    }
+    const unit = determinate ? C : P;
+    const to = Math.floor(travel.get() / unit) * unit;
+    animate(travel, to, UI).then(() => {
+      if (gen.current === g) travel.jump(0);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, determinate, targetArc, reduce, C, P, spinDuration]);
+
+  const {t} = useI18n();
+  const textMap: Record<MarkStatus, string> = {
+    pending: t.status.pending,
+    running: t.status.running,
+    done: t.status.done,
+    failed: t.status.failed,
+    cancelled: t.status.cancelled,
+    paused: t.status.paused,
+  };
+  const spoken = (textMap[status] ?? status) + (determinate && progress !== undefined ? `，${Math.round(clamp01(progress) * 100)}%` : '');
   const hasLabel = label !== undefined && label !== null;
-  const spoken = TEXT[status] + (value !== undefined ? `，${Math.round(value * 100)}%` : '');
-  const morph = {duration: reduce ? 0 : .55, ease: [.77, 0, .175, 1] as const};
-  // Slow, deliberate draw so the finished glyph is always fully seen.
-  const draw = {...morph, duration: reduce ? 0 : .65, delay: reduce ? 0 : .25};
-  return <span className={`status-mark${className ? ` ${className}` : ''}`} data-status={status}
-    data-indeterminate={indeterminate ? '' : undefined}
-    role={determinate ? 'progressbar' : undefined}
-    aria-label={determinate ? (typeof label === 'string' ? label : TEXT[status]) : undefined}
-    aria-valuemin={determinate ? 0 : undefined} aria-valuemax={determinate ? 100 : undefined}
-    aria-valuenow={value !== undefined ? Math.round(value * 100) : undefined}
-    style={{'--sm-size': `${size}px`, '--sm-font': `${fontSize}px`} as CSSProperties}>
-    <svg className="status-mark__glyph" viewBox="0 0 24 24" width={size} height={size}
-      role={!hasLabel && !determinate ? 'img' : undefined}
-      aria-label={!hasLabel && !determinate ? spoken : undefined} aria-hidden={hasLabel || determinate || undefined}>
-      <circle className="status-mark__track" cx="12" cy="12" r="9" />
-      <motion.circle className="status-mark__ring" cx="12" cy="12" r="9" transform="rotate(-90 12 12)"
-        initial={false} animate={{strokeDasharray: `${dash} ${gap}`}} transition={morph} />
-      <motion.path className="status-mark__check" d="M7.5 12.25 10.5 15.25 16.75 8.75" pathLength={1}
-        initial={false} animate={{pathLength: status === 'done' ? 1 : 0, opacity: status === 'done' ? 1 : 0}}
-        transition={draw} />
-      <motion.path className="status-mark__cross" d="M8.5 8.5 15.5 15.5M15.5 8.5 8.5 15.5" pathLength={1}
-        initial={false} animate={{pathLength: crossed ? 1 : 0, opacity: crossed ? 1 : 0}} transition={draw} />
-      <path className="status-mark__pause" d="M9.5 8.5v7M14.5 8.5v7" />
-    </svg>
-    {hasLabel && <span className="status-mark__label">
-      {!determinate && <span className="status-mark__sr">{spoken}：</span>}{label}
-    </span>}
-  </span>;
+
+  return (
+    <span
+      className={`status-mark${className ? ` ${className}` : ''}`}
+      data-status={status}
+      data-indeterminate={indeterminate ? '' : undefined}
+      data-strike={strike ? '' : undefined}
+      style={{
+        '--sm-size': `${size}px`,
+        '--sm-stroke': strokeWidth,
+        '--sm-color': color,
+        '--sm-done': doneColor,
+        '--sm-error': errorColor,
+        '--sm-fill': fillOpacity,
+        '--sm-font': `${fontSize}px`,
+        '--sm-draw': `${drawDuration}ms`,
+        '--sm-strike-delay': `${120 + strikeDelay}ms`,
+        ...(style as Record<string, string | number | undefined>),
+      } as CSSProperties}
+    >
+      <svg
+        className="status-mark__glyph"
+        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        role={hasLabel ? undefined : 'img'}
+        aria-label={hasLabel ? undefined : spoken}
+        aria-hidden={hasLabel || undefined}
+      >
+        <circle className="status-mark__track" cx="12" cy="12" r={r} transform="rotate(-90 12 12)" />
+        <circle ref={ringRef} className="status-mark__ring" cx="12" cy="12" r={r} transform="rotate(-90 12 12)" />
+        <path className="status-mark__check" d={CHECK} pathLength="1" />
+        <path className="status-mark__cross" d={CROSS} pathLength="1" />
+        {status === 'paused' && <path className="status-mark__pause" d="M9.5 8.5v7M14.5 8.5v7" />}
+      </svg>
+      {hasLabel ? <span className="status-mark__sr">{spoken}：</span> : null}
+      {hasLabel ? (
+        <span className="status-mark__label">
+          {typeof label === 'string' || typeof label === 'number' ? <TranslatedText text={label} /> : label}
+          <span className="status-mark__strike" aria-hidden="true" />
+        </span>
+      ) : null}
+    </span>
+  );
 }

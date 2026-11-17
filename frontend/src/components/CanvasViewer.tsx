@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import OpenSeadragon, {Viewer as OSDViewer} from 'openseadragon';
 import {AnimatePresence, motion} from 'motion/react';
 import {SwapOutlined} from '@ant-design/icons';
+import {TranslatedText, useI18n, type Translations} from '../i18n';
 import {PointerGesture} from '../pointerGesture';
 import {gridLineOpacity, selectGridDetail, selectGridGroupSide, SPOT_INTERACTIVE_PX, type GridDetail, type GridGroupSide} from '../gridDetail';
 import {groupGridPoints} from '../gridGroups';
@@ -96,6 +97,7 @@ export function CanvasViewer({
   lensSwap: boolean;
   reducedMotion: boolean;
 }) {
+  const {t} = useI18n();
   const element = useRef<HTMLDivElement>(null);
   const compareElement = useRef<HTMLDivElement>(null);
   const annotationLayer = useRef<HTMLDivElement>(null);
@@ -358,8 +360,8 @@ export function CanvasViewer({
         marker.classList.toggle('manual-point-pending', point.id === 'pending');
         const valueLabel = marker.querySelector('.manual-point-label');
         if (valueLabel) valueLabel.textContent = point.value === undefined ? '?' : String(point.value);
-        const valueText = point.value === undefined ? '未赋值' : `值 ${point.value}`;
-        marker.setAttribute('aria-label', `灼烧坑 ${valueText}，坐标 (${Math.round(point.x)}, ${Math.round(point.y)})`);
+        const valueText = point.value === undefined ? t.canvas.unlabeled : t.canvas.valueText(point.value);
+        marker.setAttribute('aria-label', t.canvas.spotMarkerAria(valueText, Math.round(point.x), Math.round(point.y)));
         marker.title = `${valueText} · (${Math.round(point.x)}, ${Math.round(point.y)})${point.note ? ` · ${point.note}` : ''}`;
       }
       for (const [id, marker] of annotationOverlays.current) {
@@ -1285,8 +1287,8 @@ export function CanvasViewer({
     }
   }, [lens, lensSize]);
 
-  if (!pre || !registration) return <div className="canvas-empty">该图层没有可用的配准结果。</div>;
-  const layerLabel = (value: ViewLayer) => value === 'pre' ? '采集前' : '采集后';
+  if (!pre || !registration) return <div className="canvas-empty"><TranslatedText text={t.canvas.emptyLayer} /></div>;
+  const layerLabel = (value: ViewLayer) => value === 'pre' ? t.common.pre : t.common.after;
   const lensX = lensCenter.x || lensSize / 2;
   const lensY = lensCenter.y || lensSize / 2;
   const isSingle = !compare && !lens;
@@ -1384,7 +1386,7 @@ export function CanvasViewer({
       {imageLayer('pre', element)}
       {imageLayer('after', compareElement)}
       <canvas ref={pitCanvas} className="pit-overlay" aria-hidden="true" />
-      <div ref={annotationLayer} className="manual-overlay-layer" aria-label="人工赋值点" />
+      <div ref={annotationLayer} className="manual-overlay-layer" aria-label={t.canvas.manualOverlay} />
       {compare && (
         <>
           <div className="compare-divider" style={{left: `${comparePosition}%`}} onPointerDown={handleComparePointerDown} aria-hidden="true">
@@ -1392,15 +1394,15 @@ export function CanvasViewer({
           </div>
           <input
             className="compare-range"
-            aria-label="动态对比分界位置"
+            aria-label={t.canvas.compareDivider}
             type="range"
             min={5}
             max={95}
             value={comparePosition}
             onChange={(event) => onComparePosition(Number(event.target.value))}
           />
-          <div className="compare-label compare-label-pre">{layerLabel(layer)}</div>
-          <div className="compare-label compare-label-after">{layerLabel(compareLayer)}</div>
+          <div className="compare-label compare-label-pre"><TranslatedText text={layerLabel(layer)} /></div>
+          <div className="compare-label compare-label-after"><TranslatedText text={layerLabel(compareLayer)} /></div>
         </>
       )}
       <AnimatePresence initial={false}>
@@ -1415,7 +1417,7 @@ export function CanvasViewer({
               transition={{duration: reducedMotion ? 0 : .15}}
               style={{left: lensX, top: lensY, width: lensSize, height: lensSize}}
               onPointerDown={handleLensPointerDown}
-              aria-label={`${lensFixed ? '固定' : '跟随鼠标'}透镜，内部${layerLabel(renderedLensRoles.inner)}`}
+              aria-label={t.canvas.lensAria(lensFixed, layerLabel(renderedLensRoles.inner))}
             >
             </motion.div>
           </>
@@ -1423,19 +1425,19 @@ export function CanvasViewer({
       </AnimatePresence>
       <div className={`coverage ${tileError && !switchingTarget ? 'coverage-error' : ''}${switchingTarget ? ' coverage-preparing' : ''}`} role="status" aria-live="polite" aria-atomic="true">
         {switchingTarget ? <>
-          <strong>正在切换至{layerLabel(switchingTarget)}…</strong>
-          <span className="coverage-detail">{transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress) : '图像已就绪，正在显示'}</span>
-          {tileRetryingRef.current[switchingTarget] && <span className="coverage-detail">部分图像正在重试，恢复后将自动切换</span>}
-        </> : tileError ? '部分切片暂未加载，正在自动重试…' : outside ? '当前视野超出该图层范围' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? '采样区域概览 · 点击或放大查看方格' : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '' : gridSampled && showGrid ? '当前数据已抽稀显示' : ''}
-        {switchingTarget && <span className={`coverage-progress${transitionPending ? '' : ' is-ready'}${reducedMotion ? ' is-reduced-motion' : ''}`} role="progressbar" aria-label={`${layerLabel(switchingTarget)}切换进度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={transitionPending ? undefined : 100} aria-valuetext={transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress) : '图像已就绪'}><span /></span>}
+          <strong><TranslatedText text={t.canvas.switchingTo(layerLabel(switchingTarget))} /></strong>
+          <span className="coverage-detail"><TranslatedText text={transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress, t) : t.canvas.imageReadyDisplaying} /></span>
+          {tileRetryingRef.current[switchingTarget] && <span className="coverage-detail"><TranslatedText text={t.canvas.retryingImages} /></span>}
+        </> : tileError ? t.canvas.tilesRetrying : outside ? t.canvas.outsideExtent : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'overview' ? t.canvas.gridOverview : gridPoints.length > 0 && (showGrid || showPits) && gridDetail === 'grid' ? '' : gridSampled && showGrid ? t.canvas.decimated : ''}
+        {switchingTarget && <span className={`coverage-progress${transitionPending ? '' : ' is-ready'}${reducedMotion ? ' is-reduced-motion' : ''}`} role="progressbar" aria-label={t.canvas.switchProgress(layerLabel(switchingTarget))} aria-valuemin={0} aria-valuemax={100} aria-valuenow={transitionPending ? undefined : 100} aria-valuetext={transitionPending ? preparingText(layerLabel(switchingTarget), loadProgress, t) : t.canvas.imageReady}><span /></span>}
       </div>
     </div>
   );
 }
 
-function preparingText(label: string, progress: {loaded: number; seconds: number; slow: boolean} | null) {
-  const base = `正在准备${label}当前视野`;
+function preparingText(label: string, progress: {loaded: number; seconds: number; slow: boolean} | null, t: Translations) {
+  const base = t.canvas.preparingViewport(label);
   if (!progress) return `${base}…`;
-  const detail = `已新增载入 ${progress.loaded} 块切片 · 已等待 ${progress.seconds}s`;
-  return progress.slow ? `加载耗时较长，仍在处理中 · ${detail}` : detail;
+  const detail = t.canvas.tilesLoadedProgress(progress.loaded, progress.seconds);
+  return progress.slow ? t.canvas.slowLoading(detail) : detail;
 }

@@ -16,7 +16,7 @@ export type SbdManifest = {
 export function packSbd(manifest: SbdManifest, blocks: Uint8Array[]): ArrayBuffer {
   const metadata = new TextEncoder().encode(JSON.stringify(manifest));
   const size = 12 + metadata.byteLength + blocks.reduce((sum, block) => sum + block.byteLength, 0);
-  if (metadata.byteLength > 4 * 1024 * 1024 || size > MAX_SBD_BYTES) throw new Error('SBD 所需数据超过本地提取的 128 MiB 限制');
+  if (metadata.byteLength > 4 * 1024 * 1024 || size > MAX_SBD_BYTES) throw new Error('SBD 提取数据超出 128 MB 限制');
   const output = new Uint8Array(size);
   output.set(new TextEncoder().encode(SBD_MAGIC));
   new DataView(output.buffer).setUint32(8, metadata.byteLength, true);
