@@ -76,6 +76,57 @@ function localizeBackendStage(rawStage: string, lang: 'zh' | 'en'): string {
   return rawStage;
 }
 
+// Only expose a preview after it has loaded and decoded. Local blob/data URLs
+// must remain untouched; cache-busting parameters belong only on API requests.
+function usePreviewImage(projectId: string, retryKey = 0): string | undefined {
+  const [preview, setPreview] = useState<{projectId: string; src: string}>();
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pending: HTMLImageElement | undefined;
+    const localThumb = getCachedPreviewThumbnail(projectId);
+    const endpoint = apiUrl(`/projects/${encodeURIComponent(projectId)}/preview/pre?thumb=1`);
+
+    const load = (src: string, isLocal: boolean) => {
+      if (cancelled) return;
+      const image = new Image();
+      pending = image;
+      const failed = () => {
+        if (cancelled) return;
+        if (isLocal) {
+          load(endpoint, false);
+        } else {
+          timer = setTimeout(() => load(`${endpoint}&t=${Date.now()}`, false), 3000);
+        }
+      };
+      image.onerror = failed;
+      image.onload = async () => {
+        try {
+          await image.decode();
+          if (!image.naturalWidth || !image.naturalHeight) throw new Error('Empty preview');
+          if (!cancelled) setPreview({projectId, src});
+        } catch {
+          failed();
+        }
+      };
+      image.src = src;
+    };
+
+    load(localThumb || endpoint, Boolean(localThumb));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (pending) {
+        pending.onload = null;
+        pending.onerror = null;
+      }
+    };
+  }, [projectId, retryKey]);
+
+  return preview?.projectId === projectId ? preview.src : undefined;
+}
+
 export function ProcessingScreen({project, onHome, connectionError}: {project: Project; onHome: () => void; connectionError?: string}) {
   const {t, language} = useI18n();
   const progress = project.progress;
@@ -123,17 +174,8 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
     error: t.processing.stageError,
   };
 
-  const localThumb = getCachedPreviewThumbnail(project.id);
-  const previewUrl = localThumb || apiUrl(`/projects/${encodeURIComponent(project.id)}/preview/pre?thumb=1`);
-  const [previewError, setPreviewError] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
-
-  useEffect(() => {
-    if (previewError) {
-      setPreviewError(false);
-      setPreviewKey((k) => k + 1);
-    }
-  }, [rawStage]);
+  const previewUrl = usePreviewImage(project.id, previewKey);
 
   const currentProjectName = projectName(project, language);
 
@@ -170,18 +212,9 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
                   width={320}
                   aspectRatio="4 / 3"
                   labels={refineLabels}
-                  onRetry={() => {
-                    setPreviewError(false);
-                    setPreviewKey((k) => k + 1);
-                  }}
+                  onRetry={() => setPreviewKey((k) => k + 1)}
                 >
-                  <img
-                    key={previewKey}
-                    src={`${previewUrl}?t=${previewKey}`}
-                    alt={t.processing.previewAlt}
-                    crossOrigin="anonymous"
-                    onError={() => setPreviewError(true)}
-                  />
+                  {previewUrl && <img src={previewUrl} alt={t.processing.previewAlt} />}
                 </RefineFrame>
               </div>
             </div>
