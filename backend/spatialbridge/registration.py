@@ -479,8 +479,12 @@ def marker_registration(source: Path, target: Path, label: str, *,
     # win just because a reflected square permutation fits a few pixels better.
     direct_candidates = [item for item in fit_candidates if item[3] == 0]
     eligible = fit_candidates if allow_reflection else (direct_candidates or fit_candidates)
+    # Symmetric square holes can make the direct and reversed pairings fit
+    # equally well (a 180° rotation about the marker midpoint).  Compare errors
+    # at 0.01 px resolution so floating-point noise, which differs between
+    # OpenCV/BLAS builds, cannot decide; an exact tie keeps the direct pairing.
     _, _, _, _, matrix_small, residual, centre_errors, selected_pairing = min(
-        eligible, key=lambda item: (item[0], item[1], item[2]),
+        eligible, key=lambda item: (round(item[0], 2), round(item[1], 2), round(item[2], 2), item[3]),
     )
     matrix = scaled_matrix(matrix_small, source_scale, target_scale)
     source_w, source_h = dimensions(source)
