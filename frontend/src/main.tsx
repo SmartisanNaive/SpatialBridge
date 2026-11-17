@@ -1,7 +1,7 @@
 import React, {Suspense, lazy, useEffect, useRef, useState} from 'react';
 import ReactDOM from 'react-dom/client';
 import {AnimatePresence, motion} from 'motion/react';
-import {Spin} from 'antd';
+import GradientASCII from './components/GradientASCII';
 import {parseRoute} from './flow';
 import type {AppRoute} from './flow';
 import type {Project, DemoInfo} from './types';
@@ -193,7 +193,12 @@ function RedesignedApp() {
   };
   const openProject = (item: Project) => { setActiveProject(null); navigateProject(item.id); };
 
-  const routeLoading = <div className="route-loading"><Spin size="large" /><span><TranslatedText text={t.main.loadingProject} /></span></div>;
+  const routeLoading = (
+    <div className="route-loading" aria-busy="true">
+      <GradientASCII />
+      <span className="route-loading__label" role="status"><TranslatedText text={t.main.loadingProject} /></span>
+    </div>
+  );
   let content: React.ReactNode;
   if (route.kind === 'home') {
     content = <ProjectHome projects={projects} currentProject={activeProject} onProject={handleUploadedProject} onDemo={startDemo} demoAvailable={demoAvailable} onOpen={openProject} onRetry={retryProject} busy={busy} error={homeError || undefined} />;

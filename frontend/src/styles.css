@@ -135,7 +135,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .processing-step-item.step-running .processing-step-desc { color: #3a5c50; }
 .processing-card .ant-alert { margin-top: 18px; border-radius: 8px; }
 .processing-actions { display: flex; gap: 8px; margin-top: 26px; }
-.route-loading { display: grid; min-height: 100vh; align-content: center; justify-items: center; gap: 13px; color: #71807a; font-size: 12px; background: #f4f6f8; }
+.route-loading { position: relative; isolation: isolate; display: grid; min-height: 100vh; min-height: 100svh; place-items: center; overflow: hidden; background: #f4f6f8; }
+.route-loading__label { position: relative; z-index: 1; max-width: calc(100% - 32px); padding: 12px 20px; color: #344e61; background: #f4f6f8; border-radius: 6px; font-size: 14px; font-weight: 500; text-align: center; pointer-events: none; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #5a9b82; box-shadow: 0 0 0 3px #e4f1eb; }
 .workspace-flow { display: flex; min-width: 0; align-items: center; gap: 8px; color: #8a9892; font-size: 11px; white-space: nowrap; }
 .workspace-back { display: inline-flex; height: 30px; align-items: center; gap: 5px; padding: 0 8px; color: #55766a; background: #f3f8f5; border: 1px solid #dfeae5; border-radius: 6px; cursor: pointer; font-size: 11px; }
