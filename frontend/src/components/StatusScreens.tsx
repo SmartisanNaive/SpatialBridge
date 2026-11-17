@@ -6,7 +6,7 @@ import type {Project} from '../types';
 import {apiUrl} from '../api';
 import {getCachedPreviewThumbnail} from '../utils';
 import {TranslatedText, useI18n, LanguageSwitch} from '../i18n';
-import LatticeLoader from './LatticeLoader';
+import CubeLoader from './CubeLoader';
 import StatusMark, {type MarkStatus} from './StatusMark';
 import RefineFrame, {type RefineFrameStatus} from './RefineFrame';
 
@@ -154,19 +154,7 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
         <div className="processing-breadcrumb"><TranslatedText text={t.processing.breadcrumbProject} /> / <TranslatedText text={projectName(project, language)} /></div>
         <Card className="processing-card" variant="borderless">
           <div className="processing-loader-header">
-            <LatticeLoader
-              label={isQueued ? t.processing.loaderQueued : t.processing.loaderRunning}
-              status="working"
-              pattern="orbit"
-              grid={4}
-              cellSize={7}
-              gap={3}
-              fontSize={20}
-              color="#2d6a5b"
-              glow
-              glowColor="rgba(45, 106, 91, 0.25)"
-              showTimer
-            />
+            <CubeLoader label={isQueued ? t.processing.loaderQueued : t.processing.loaderRunning} />
           </div>
           <Typography.Paragraph type="secondary">
             <TranslatedText text={t.processing.loaderDesc} />
