@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你愿意改进 SpatialBridge。提交 issue 或 pull request 前，请先阅读以下说明。
+感谢你愿意改进 SpatialBridge。提交 issue 或 pull request 前，请先阅读以下说明。详细的工程规范、分层解耦原则与架构设计请参阅 [docs/development-guide.md](docs/development-guide.md)。
 
 ## 开发环境
 

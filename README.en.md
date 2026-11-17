@@ -37,6 +37,62 @@ SpatialBridge reads per-spot coordinates and normalization values from a SCiLS S
 
 ![Workbench swipe comparison](docs/images/workbench-swipe.png)
 
+## Architecture & CV Pipeline
+
+To address the challenges of gigapixel microscopy scans (typically $74,000 \times 8,500$ pixels, $\sim 630\text{ Mpx}$), subtle laser ablation marks, and cross-modal imaging discrepancies, SpatialBridge incorporates a four-stage, high-precision computer vision pipeline:
+
+```mermaid
+flowchart TD
+    subgraph M1["1. Subpixel Marker & Homography Registration"]
+        A["Pre/Post Microscopy Scans (73k×8k px)"] --> B["Multi-Threshold Bipolar Contour Tree"]
+        B --> C["Detect 2 Circle-Square Markers (8 Hole Corners)"]
+        C --> D["Phase Enumeration + Homography Fit H"]
+        D --> E["Pre/Post Homography (Reprojection RMSE < 1e-12 px)"]
+    end
+
+    subgraph M2["2. Cross-Modal Registration & Closed-Loop Chain"]
+        F["SBD Embedded Slide Image"] <-->|"Texture Match + Orientation Detection"| G["MALDI Heat Map (Optional OCR)"]
+        E -.->|"Spatial Matrix Loop"| H["Independent Consistency Check via OriginalCoordinates (p95 < 1 px)"]
+    end
+
+    subgraph M3["3. Burn-Pit Detection & Optical Lattice Fitting"]
+        I["Local Clear Regions"] --> J["FLANN Near-Axis Lattice Topology"]
+        J --> K["Sparse Outline Cross-Correlation (Origin & Mirroring)"]
+        K --> L["Spatial Hold-Out Polynomial Model Selection (Affine / Deg-2 / Deg-3)"]
+        L --> M["Global Optical Lattice Model (Degree-2 Corrects Slide Warping)"]
+    end
+
+    subgraph M4["4. Gigapixel Multi-Scale Streaming Engine"]
+        N["Single-Channel L Mode Decoupling"] --> O["Multi-Threaded Lanczos Tile Pyramid"]
+        O --> P["Inverse Homography Viewport Sampling + Batch Canvas Paths (100k+ Spots at 60fps)"]
+    end
+```
+
+### Key CV Pipeline Strengths
+
+1. **8-Corner Hole Homography (Overcoming 2-Centroid Similarity Limits)**
+   - **Challenge**: Over ultra-wide slide scans ($74,000 \times 8,500$ px), mechanical stage feed errors and optical distortions introduce subtle scale drift, shear, and keystone skew across the long axis. Standard 2-marker centroid similarity transforms (4 degrees of freedom) cannot capture these non-rigid deformations.
+   - **Solution**: Using topological contour tree analysis (`RETR_TREE`), SpatialBridge detects the square inner cavity within both circular markers, extracting all **8 hole corners**. By enumerating 4 cyclic phases and reflections, it fits an 8-DOF homography matrix $H \in \mathbb{R}^{3 \times 3}$, pushing the reprojection RMSE down to floating-point machine precision ($< 10^{-12}\text{ px}$) for exact subpixel alignment.
+
+   ![Subpixel 8-Corner Homography Registration](docs/images/homography-registration.png)
+
+2. **Laser Burn-Pit Detection & Polynomial Optical Lattice (Evolving SpaceM Concepts)**
+   - **Challenge**: Non-uniform tissue thickness and low local contrast cause standard direct object detectors to suffer high false negatives or noise-induced false positives.
+   - **Solution**: Inspired by SpaceM's principle of recovering regular lattice topology from high-SNR regions first, the system identifies local Gaussian response peaks and links near-axis neighbours via FLANN (tolerating 1–2 missing nodes). It aligns integer origin and mirror orientation against the SBD's sparse footprint outline via discrete cross-correlation. Finally, it uses a **spatial hold-out set** to benchmark affine, degree-2, and degree-3 polynomial surface models, adaptively selecting `sbd-optical-lattice-v2-degree2` ($[1, x, y, x^2, xy, y^2]$) to correct physical slide warping while strictly avoiding overfitting.
+
+   ![Burn-Pit Optical Lattice Recovery & Surface Manifold Fitting](docs/images/lattice-workflow.png)
+
+3. **Closed-Loop Multi-Modal Coordinate Chain**
+   - Establishes a seamless, continuous coordinate mapping:
+     $$\text{SBD World} \xrightarrow{\text{World2Px}} \text{Slide Pixel} \xrightarrow{\text{Texture Match}} \text{Heat Map Pixel} \xrightarrow{H} \text{Post-Acquisition Pixel} \xrightarrow{H^{-1}} \text{Pre-Acquisition Pixel}$$
+   - Uses SBD `OriginalCoordinates` for independent geometric loop closure, enforcing a strict $p95 < 1\text{ px}$ validation gate to guarantee spot-level fidelity.
+
+   ![Multi-Modal Closed-Loop Coordinate Chain & Transformation Pipeline](docs/images/coordinate-chain.png)
+
+4. **Single-Channel Decoupled Gigapixel Tile Engine**
+   - Keeps single-channel grayscale (`L` mode) throughout pyramid construction to avoid expanding a 630 Mpx image into multi-gigabyte RGBA memory buffers.
+   - Generates OpenSeadragon-compliant multi-resolution pyramids via multi-threaded Lanczos downsampling. At runtime, it performs inverse projective viewport sampling and batch Canvas path rendering, enabling smooth 60fps swipe comparison across 100k+ spot footprints.
+
 ## Quick start
 
 ### Requirements
@@ -89,13 +145,15 @@ See the [deployment guide](docs/deployment.md) (Chinese) for configuration, upda
 
 ## Documentation
 
-The detailed documents are currently in Chinese.
+The full documentation index is available at [docs/README.md](docs/README.md) (in Chinese).
 
 | Document | Contents |
 | --- | --- |
-| [docs/deployment.md](docs/deployment.md) | Linux deployment, configuration, operations, backup and restore, acceptance checklist |
-| [docs/algorithm.md](docs/algorithm.md) | Coordinate chain, lattice detection, output files, workbench interaction, HTTP API |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, code layout, commit conventions |
+| [docs/technical-architecture.md](docs/technical-architecture.md) | CV pipeline deep-dive, 8-corner homography derivation, FLANN lattice fitting, closed-loop coordinate chain, and WASM extraction |
+| [docs/deployment.md](docs/deployment.md) | Comprehensive deployment & operations guide: development setup, Linux Docker Compose, macOS Apple Container, capacity planning, Nginx TLS, and disaster recovery |
+| [docs/algorithm.md](docs/algorithm.md) | Coordinate conventions ($xy$/$yx$), output specifications, workbench interaction logic, and HTTP REST API |
+| [docs/development-guide.md](docs/development-guide.md) | Architecture decoupling principles, memory protection guidelines, coding standards, 3-tier test gates, and Conventional Commits |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Quick contributor onboarding guide and Pull Request workflow |
 
 ## Project layout
 
