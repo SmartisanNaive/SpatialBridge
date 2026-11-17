@@ -117,3 +117,41 @@ def test_heatmap_supplied_with_the_project_is_shown_without_a_second_upload(tmp_
         assert client.get("/api/projects/uploaded/heatmap/colors?raster=0").json()["items"][0] == [0, 20, 160, 90]
         assert client.get("/api/projects/uploaded/heatmap").json()["available"] is True
         assert len(calls) == 1
+
+
+def test_project_thumbnail_and_preview_endpoints(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    data_dir = tmp_path / "data"
+    project_dir = data_dir / "projects" / "p1"
+    project_dir.mkdir(parents=True)
+    cache_dir = project_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    pre_preview = cache_dir / "pre-preview.png"
+    pre_preview.write_bytes(png_bytes((120, 40, 200)))
+    store = Store(data_dir)
+    store.create_project("p1", "data://dummy", "项目预览测试", "directory")
+    store.update_project("p1", "ready", {"report": {
+        "sources": [
+            {
+                "key": "pre",
+                "role": "microscopy_pre",
+                "path": "project://cache/pre-preview.png",
+                "preview_path": "project://cache/pre-preview.png",
+                "width": 1000,
+                "height": 800,
+            }
+        ]
+    }})
+    store.close()
+    with TestClient(app_module.create_app(data_dir)) as client:
+        res1 = client.get("/api/projects/p1/thumbnail")
+        assert res1.status_code == 200
+        assert res1.headers["content-type"] == "image/png"
+        assert res1.content == pre_preview.read_bytes()
+
+        res2 = client.get("/api/projects/p1/preview/pre")
+        assert res2.status_code == 200
+        assert res2.content == pre_preview.read_bytes()
+
+        res_missing = client.get("/api/projects/unknown/thumbnail")
+        assert res_missing.status_code == 404

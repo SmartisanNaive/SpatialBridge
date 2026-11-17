@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from .heatmap import SAMPLING_VERSION, HeatmapRegistrationError, crop_board_reference, match_heatmap, sample_spot_colours
 from .lattice import evaluate_coordinate_model
-from .registration import build_project, make_browser_preview
+from .registration import build_project, find_inputs, make_browser_preview, make_quick_preview_thumbnail
 from .storage import Store
 from .sbd import materialize_sbd_package, validate_sbd_extract
 from .tiles import blank_tile, build_tile_pyramid, common_tile, pyramid_tile
@@ -1344,6 +1344,92 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
         if project_dir not in artifact_path.parents or not artifact_path.is_file():
             raise HTTPException(404, "Validation artifact not found")
         return FileResponse(artifact_path)
+
+    @app.get("/api/projects/{project_id}/thumbnail")
+    @app.get("/api/projects/{project_id}/preview/{layer}")
+    def preview_layer(project_id: str, layer: str = "pre", thumb: bool = False) -> FileResponse:
+        project = store.get_project(project_id)
+        if not project or project.get("status") not in {"ready", "processing", "running", "queued", "imported"}:
+            raise HTTPException(404, "Project not ready or not found")
+        project_dir = (data_dir / "projects" / project_id).resolve()
+        cache_dir = project_dir / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        is_loading = project.get("status") in {"running", "queued", "processing"} or thumb
+
+        report = project.get("report") or {}
+        sources = report.get("sources") or []
+        source = next((item for item in sources if item.get("key") == layer), None)
+        if not source and layer != "pre":
+            source = next((item for item in sources if item.get("key") == "pre"), None)
+
+        # For loading-screen preview, serve a deeply compressed lightweight thumbnail (under 50KB)
+        if is_loading:
+            target_source_path = None
+            if source:
+                target_source_path = resolve_project_file(source["path"], project_id)
+            else:
+                source_dir = Path(project["source_dir"]) if project.get("source_dir") else None
+                manifest = None
+                if project.get("upload_id"):
+                    upload = store.get_upload(project["upload_id"])
+                    if upload and upload.get("manifest"):
+                        manifest = [{**item, "path": str(upload_file_path(project["upload_id"], item))} for item in upload["manifest"]]
+                if source_dir or manifest:
+                    try:
+                        inputs = find_inputs(source_dir or data_dir, manifest)
+                        target_key = layer if layer in {"pre", "after"} else "pre"
+                        target_source_path = inputs.get(target_key) or inputs.get("pre")
+                    except Exception:
+                        pass
+            if target_source_path and Path(target_source_path).is_file():
+                with preview_lock:
+                    thumb_path, _ = make_quick_preview_thumbnail(Path(target_source_path), cache_dir, max_size=640)
+                    if thumb_path and Path(thumb_path).is_file():
+                        return FileResponse(Path(thumb_path), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+        if source:
+            if source.get("preview_path"):
+                preview_file = resolve_project_file(source["preview_path"], project_id)
+                if preview_file.is_file():
+                    return FileResponse(preview_file, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+            source_path = resolve_project_file(source["path"], project_id)
+            if source_path.is_file():
+                with preview_lock:
+                    preview_path, preview_scale = make_browser_preview(source_path, cache_dir)
+                    if preview_path and Path(preview_path).is_file():
+                        source["preview_path"] = project_reference(project_id, Path(preview_path))
+                        source["preview_scale"] = preview_scale
+                        try:
+                            store.update_project(project_id, project.get("status", "ready"), {"report": report})
+                        except Exception:
+                            pass
+                        return FileResponse(Path(preview_path), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+                return FileResponse(source_path, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+
+        # Fallback when report is not yet generated (e.g. during processing or queuing)
+        source_dir = Path(project["source_dir"]) if project.get("source_dir") else None
+        manifest = None
+        if project.get("upload_id"):
+            upload = store.get_upload(project["upload_id"])
+            if upload and upload.get("manifest"):
+                manifest = [{**item, "path": str(upload_file_path(project["upload_id"], item))} for item in upload["manifest"]]
+        if source_dir or manifest:
+            try:
+                inputs = find_inputs(source_dir or data_dir, manifest)
+                target_key = layer if layer in {"pre", "after"} else "pre"
+                target_path = inputs.get(target_key) or inputs.get("pre")
+                if target_path and Path(target_path).is_file():
+                    with preview_lock:
+                        thumb_path, _ = make_quick_preview_thumbnail(Path(target_path), cache_dir, max_size=640)
+                        if thumb_path and Path(thumb_path).is_file():
+                            return FileResponse(Path(thumb_path), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+                        preview_path, _ = make_browser_preview(Path(target_path), cache_dir)
+                        if preview_path and Path(preview_path).is_file():
+                            return FileResponse(Path(preview_path), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+                    return FileResponse(Path(target_path), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+            except Exception:
+                pass
+        raise HTTPException(404, "Requested preview layer not found")
 
     if frontend_dir is not None:
         frontend_root = frontend_dir.expanduser().resolve()

@@ -5,6 +5,7 @@ import json
 import math
 import re
 import subprocess
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
@@ -46,22 +47,91 @@ def make_browser_preview(source: Path, cache_dir: Path) -> tuple[str | None, flo
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     destination = cache_dir / f"{file_hash(source)[:16]}-max4096.png"
-    if not destination.exists():
+    if not (destination.is_file() and destination.stat().st_size > 0):
+        temp_destination = cache_dir / f"{file_hash(source)[:16]}-max4096.{uuid.uuid4().hex}.tmp"
         try:
-            subprocess.run(["sips", "-Z", "4096", str(source), "--out", str(destination)], check=True,
+            subprocess.run(["sips", "-Z", "4096", str(source), "--out", str(temp_destination)], check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         except (OSError, subprocess.CalledProcessError):
             try:
                 with Image.open(source) as image:
-                    downscaled(image, 4096, "RGBA")[0].save(destination, "PNG", optimize=True)
+                    downscaled(image, 4096, "RGBA")[0].save(temp_destination, "PNG", optimize=True)
             except (OSError, ValueError):
+                if temp_destination.exists():
+                    temp_destination.unlink(missing_ok=True)
                 return None, None
+        try:
+            temp_destination.replace(destination)
+        except OSError:
+            if temp_destination.exists():
+                temp_destination.unlink(missing_ok=True)
     try:
         original_width, _ = dimensions(source)
         preview_width, _ = dimensions(destination)
         return str(destination), preview_width / original_width
     except OSError:
         return None, None
+
+
+def make_quick_preview_thumbnail(source: Path, cache_dir: Path, max_size: int = 640) -> tuple[str | None, float | None]:
+    """Build a tiny, heavily compressed thumbnail exclusively for the loading-screen preview.
+
+    This thumbnail is strictly for the loading/refining preview and is not used
+    for registration, tile pyramid, or workbench display.
+    It writes to a temporary file and atomically replaces it so clients never
+    read incomplete files.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    source_hash = file_hash(source)[:16]
+    destination = cache_dir / f"{source_hash}-thumb{max_size}.jpg"
+    if destination.is_file() and destination.stat().st_size > 0:
+        try:
+            original_width, _ = dimensions(source)
+            thumb_width, _ = dimensions(destination)
+            return str(destination), thumb_width / original_width
+        except OSError:
+            return str(destination), 1.0
+
+    temp_destination = cache_dir / f"{source_hash}-thumb{max_size}.{uuid.uuid4().hex}.tmp"
+    try:
+        subprocess.run(
+            ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "80", "-Z", str(max_size), str(source), "--out", str(temp_destination)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+        )
+    except (OSError, subprocess.CalledProcessError):
+        try:
+            with Image.open(source) as image:
+                if image.mode != "RGB":
+                    rgb_img = Image.new("RGB", image.size, (255, 255, 255))
+                    if image.mode == "RGBA":
+                        rgb_img.paste(image, mask=image.split()[3])
+                    else:
+                        rgb_img.paste(image.convert("RGB"))
+                else:
+                    rgb_img = image
+                scale = min(1.0, max_size / max(rgb_img.width, rgb_img.height))
+                new_size = (max(1, round(rgb_img.width * scale)), max(1, round(rgb_img.height * scale)))
+                resized = rgb_img.resize(new_size, Image.Resampling.BILINEAR)
+                resized.save(temp_destination, "JPEG", quality=80, optimize=True)
+        except Exception:
+            if temp_destination.exists():
+                temp_destination.unlink(missing_ok=True)
+            return None, None
+
+    try:
+        temp_destination.replace(destination)
+    except OSError:
+        if temp_destination.exists():
+            temp_destination.unlink(missing_ok=True)
+        if not destination.is_file():
+            return None, None
+
+    try:
+        original_width, _ = dimensions(source)
+        thumb_width, _ = dimensions(destination)
+        return str(destination), thumb_width / original_width
+    except OSError:
+        return str(destination), 1.0
 
 
 def find_inputs(source_dir: Path, input_manifest: list[dict[str, Any]] | None = None) -> dict[str, Any]:
