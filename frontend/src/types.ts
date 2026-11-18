@@ -25,7 +25,7 @@ export type Report = {
   validation_artifacts?: string[];
 };
 export type ProgressInfo = {stage?: string; completed?: number; total?: number};
-export type Project = {id: string; created_at?: string; source_dir?: string; project_name?: string; import_type?: string; upload_id?: string; status: string; error?: string; stage?: string; progress?: ProgressInfo; report?: Report};
+export type Project = {id: string; created_at?: string; deleted_at?: string | null; source_dir?: string; project_name?: string; import_type?: string; upload_id?: string; status: string; error?: string; stage?: string; progress?: ProgressInfo; report?: Report};
 export type DemoInfo = {available: boolean; label: string};
 export type UploadRole = 'pre' | 'after' | 'sbd' | 'heatmap';
 export type UploadChunk = {index: number; size: number; sha256: string};

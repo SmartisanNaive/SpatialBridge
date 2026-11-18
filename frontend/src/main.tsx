@@ -8,7 +8,7 @@ import type {Project, DemoInfo} from './types';
 import {apiFetch, errorText} from './api';
 import {ProjectHome} from './components/ProjectHome';
 import {ProcessingScreen, FailedProjectScreen} from './components/StatusScreens';
-import {TranslatedText, LanguageProvider, useI18n} from './i18n';
+import {LanguageProvider, useI18n} from './i18n';
 import 'antd/dist/reset.css';
 import './styles.css';
 
@@ -28,6 +28,8 @@ function RedesignedApp() {
   const [connectionError, setConnectionError] = useState('');
   const requestVersion = useRef(0);
   const busyRef = useRef(false);
+  const deletedIdsRef = useRef(new Set<string>());
+  const filterVisibleProjects = (items: Project[]) => items.filter((item) => !item.deleted_at && !deletedIdsRef.current.has(item.id));
   const routeMotionDuration = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : .2;
 
   const navigateHome = () => {
@@ -54,7 +56,7 @@ function RedesignedApp() {
         apiFetch<DemoInfo>('/demo'),
       ]);
       if (!active) return;
-      if (projectsResult.status === 'fulfilled') setProjects(projectsResult.value);
+      if (projectsResult.status === 'fulfilled') setProjects(filterVisibleProjects(projectsResult.value));
       else setHomeError(errorText(projectsResult.reason));
       if (demoResult.status === 'fulfilled') {
         const demo = demoResult.value;
@@ -136,12 +138,12 @@ function RedesignedApp() {
     let delay = 2400;
     const refresh = async () => {
       try {
-        const items = await apiFetch<Project[]>('/projects');
+        const items = filterVisibleProjects(await apiFetch<Project[]>('/projects'));
         if (active) {
           setProjects(items);
           setActiveProject((current) => current && items.some((item) => item.id === current.id)
             ? {...current, ...items.find((item) => item.id === current.id)}
-            : current);
+            : current && deletedIdsRef.current.has(current.id) ? null : current);
           setHomeError('');
         }
         delay = 2400;
@@ -186,6 +188,22 @@ function RedesignedApp() {
       setHomeError(errorText(error, language));
     } finally { busyRef.current = false; setBusy(false); }
   };
+  const deleteProject = async (item: Project): Promise<boolean> => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    setBusy(true);
+    setHomeError('');
+    try {
+      await apiFetch<{deleted: boolean; id: string}>(`/projects/${encodeURIComponent(item.id)}`, {method: 'DELETE'});
+      deletedIdsRef.current.add(item.id);
+      setProjects((items) => items.filter((existing) => existing.id !== item.id));
+      setActiveProject((current) => current?.id === item.id ? null : current);
+      return true;
+    } catch (error) {
+      setHomeError(errorText(error, language));
+      return false;
+    } finally { busyRef.current = false; setBusy(false); }
+  };
   const handleUploadedProject = (item: Project) => {
     setActiveProject(item);
     setProjects((items) => [item, ...items.filter((existing) => existing.id !== item.id)]);
@@ -194,14 +212,13 @@ function RedesignedApp() {
   const openProject = (item: Project) => { setActiveProject(null); navigateProject(item.id); };
 
   const routeLoading = (
-    <div className="route-loading" aria-busy="true">
+    <div className="route-loading" role="status" aria-busy="true" aria-label={t.main.loadingProject}>
       <GradientASCII />
-      <span className="route-loading__label" role="status"><TranslatedText text={t.main.loadingProject} /></span>
     </div>
   );
   let content: React.ReactNode;
   if (route.kind === 'home') {
-    content = <ProjectHome projects={projects} currentProject={activeProject} onProject={handleUploadedProject} onDemo={startDemo} demoAvailable={demoAvailable} onOpen={openProject} onRetry={retryProject} busy={busy} error={homeError || undefined} />;
+    content = <ProjectHome projects={projects} currentProject={activeProject} onProject={handleUploadedProject} onDemo={startDemo} demoAvailable={demoAvailable} onOpen={openProject} onRetry={retryProject} onDelete={deleteProject} busy={busy} error={homeError || undefined} />;
   } else if (projectLoading || !activeProject) {
     content = routeLoading;
   } else if (activeProject.status === 'failed') {

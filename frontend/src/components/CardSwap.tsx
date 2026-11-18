@@ -1,5 +1,5 @@
-import {useEffect, useRef, useState, type ReactNode} from 'react';
-import {AnimatePresence, motion, useDragControls, useReducedMotion, type PanInfo} from 'motion/react';
+import {useEffect, useRef, type ReactNode} from 'react';
+import {motion, useDragControls, useReducedMotion, type PanInfo} from 'motion/react';
 import {useI18n} from '../i18n';
 import './CardSwap.css';
 
@@ -12,8 +12,6 @@ export default function CardSwap({items, activeId, onChange}: {
 }) {
   const reduce = useReducedMotion();
   const dragControls = useDragControls();
-  const [leaving, setLeaving] = useState<{card: SwapCard; x: number; direction: number; token: number} | null>(null);
-  const sequence = useRef(0);
   const queuedSteps = useRef<ReturnType<typeof setTimeout>[]>([]);
   const advanceRef = useRef<(direction: number) => void>(() => {});
   const cancelQueue = () => {
@@ -24,13 +22,12 @@ export default function CardSwap({items, activeId, onChange}: {
   useEffect(() => cancelQueue, [itemIds]);
   const active = Math.max(0, items.findIndex(item => item.id === activeId));
   const visible = Array.from({length: Math.min(4, items.length)}, (_, i) => items[(active + i) % items.length]);
-  const shift = (direction: number, x = 0, keepQueue = false) => {
+  const shift = (direction: number, keepQueue = false) => {
     if (!keepQueue) cancelQueue();
     if (items.length < 2) return;
-    if (!reduce) setLeaving({card: items[active], x, direction, token: ++sequence.current});
     onChange(items[(active + direction + items.length) % items.length].id);
   };
-  advanceRef.current = direction => shift(direction, 0, true);
+  advanceRef.current = direction => shift(direction, true);
   const bringToFront = (position: number) => {
     cancelQueue();
     if (reduce) {
@@ -44,7 +41,7 @@ export default function CardSwap({items, activeId, onChange}: {
   };
   const finishDrag = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (Math.abs(info.offset.x) > 60 || Math.abs(info.velocity.x) > 500) {
-      shift(info.offset.x < 0 ? 1 : -1, info.offset.x);
+      shift(info.offset.x < 0 ? 1 : -1);
     }
   };
   const {t} = useI18n();
@@ -96,15 +93,6 @@ export default function CardSwap({items, activeId, onChange}: {
         <div className="card-swap-content" aria-hidden={position !== 0} {...{inert: position === 0 ? undefined : ''}}>{card.content}</div>
         <span className="card-swap-shade" aria-hidden="true" style={{opacity: position * .08}} />
       </motion.div>)}
-      <AnimatePresence>
-        {leaving && <motion.div key={leaving.token} className="card-swap-slot card-swap-leaving" aria-hidden="true"
-          ref={node => node?.setAttribute('inert', '')}
-          initial={{x: leaving.x, y: 0, rotate: 0, opacity: 1}}
-          animate={{x: leaving.x + leaving.direction * 35, y: 390, rotate: leaving.direction * 7, opacity: 0}}
-          transition={{duration: .42, ease: [.22, .68, .3, 1]}}
-          onAnimationComplete={() => setLeaving(current => current?.token === leaving.token ? null : current)}
-        >{leaving.card.content}</motion.div>}
-      </AnimatePresence>
     </div>
     <div className="card-swap-navigation">
       <button type="button" onClick={() => shift(-1)} disabled={items.length < 2} aria-label={t.cardSwap.prevProject}>←</button>

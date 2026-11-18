@@ -403,3 +403,62 @@ def test_moved_project_can_render_its_cached_preview(tmp_path, preview_reference
         response = client.get("/api/projects/demo/layers/pre/tiles/0/0/0.png")
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
+
+
+def test_soft_delete_project_hides_record_and_keeps_files(tmp_path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    source_file = source_dir / "before.png"
+    source_file.write_bytes(b"source-data")
+
+    data_dir = tmp_path / "data"
+    project_file = data_dir / "projects" / "proj-1" / "report.json"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text("{}", encoding="utf-8")
+
+    store = Store(data_dir)
+    store.create_project("proj-1", str(source_dir), "Sample 1")
+    store.create_project("proj-2", str(source_dir), "Sample 2")
+    store.update_project("proj-1", "ready", {"report": {"sources": []}})
+    store.update_project("proj-2", "ready", {"report": {"sources": []}})
+    store.close()
+
+    with TestClient(create_app(data_dir)) as client:
+        before_ids = [item["id"] for item in client.get("/api/projects").json()]
+        assert set(before_ids) == {"proj-1", "proj-2"}
+
+        deleted = client.delete("/api/projects/proj-1")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"deleted": True, "id": "proj-1"}
+
+        # Deleted record is hidden from list and detail APIs, and repeating delete returns 404.
+        after_ids = [item["id"] for item in client.get("/api/projects").json()]
+        assert after_ids == ["proj-2"]
+        assert client.get("/api/projects/proj-1").status_code == 404
+        assert client.delete("/api/projects/proj-1").status_code == 404
+
+    # Both source files and generated project files remain untouched on disk.
+    assert source_file.read_bytes() == b"source-data"
+    assert project_file.read_text(encoding="utf-8") == "{}"
+
+    # The row still exists in SQLite with deleted_at set.
+    verify_store = Store(data_dir)
+    assert verify_store.get_project("proj-1") is None
+    deleted_row = verify_store.get_project("proj-1", include_deleted=True)
+    assert deleted_row is not None
+    assert deleted_row["deleted_at"]
+    verify_store.close()
+
+
+def test_soft_deleted_active_project_is_not_reused(tmp_path):
+    store = Store(tmp_path)
+    source = str(tmp_path / "source")
+    first, reused_first = store.get_or_create_active("first", source)
+    assert reused_first is False
+    assert store.delete_project(first["id"]) is True
+
+    second, reused_second = store.get_or_create_active("second", source)
+    assert reused_second is False
+    assert second["id"] == "second"
+    assert [item["id"] for item in store.list_projects()] == ["second"]
+    store.close()

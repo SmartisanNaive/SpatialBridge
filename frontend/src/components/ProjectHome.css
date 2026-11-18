@@ -74,6 +74,10 @@
   box-shadow: 0 18px 54px rgba(27, 55, 48, .07);
 }
 
+.home-import-card h3 {
+  margin: 0 0 6px !important;
+}
+
 .home-lens-card > .rays-svg,
 .home-lens-card > .beams-svg {
   display: none;
@@ -86,11 +90,12 @@
 .project-home .home-lens-heading {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 14px;
 }
 
 .project-home .home-lens-heading h3 {
-  margin: 4px 0 0;
+  margin: 0;
   color: #22322e !important;
   font-size: 20px;
 }

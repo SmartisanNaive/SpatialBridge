@@ -63,6 +63,7 @@ export function ProjectHome({
   demoAvailable,
   onOpen,
   onRetry,
+  onDelete,
   busy,
   error,
 }: {
@@ -73,6 +74,7 @@ export function ProjectHome({
   demoAvailable: boolean;
   onOpen: (project: Project) => void;
   onRetry: (project: Project) => void;
+  onDelete: (project: Project) => Promise<boolean>;
   busy: boolean;
   error?: string;
 }) {
@@ -599,7 +601,8 @@ export function ProjectHome({
   };
 
 
-  const activeProcessingProjects = projects.filter((item) => item.status === 'running' || item.status === 'queued');
+  const visibleProjects = projects.filter((item) => !item.deleted_at);
+  const activeProcessingProjects = visibleProjects.filter((item) => item.status === 'running' || item.status === 'queued');
 
   return (
     <Layout className="app project-home-app">
@@ -625,10 +628,9 @@ export function ProjectHome({
           <Typography.Paragraph><TranslatedText text={t.home.heroDesc} /></Typography.Paragraph>
           {currentProject && <div className="home-current"><div><span><TranslatedText text={t.home.currentProjectPrefix} /><TranslatedText text={projectStatusLabel(currentProject.status, language)} /></span><strong><TranslatedText text={projectName(currentProject, language)} /></strong></div><Button size="small" disabled={busy || uploading} onClick={() => onOpen(currentProject)}><TranslatedText text={t.home.enterCurrentProject} /></Button></div>}
         </section>
-        <div className={`home-grid${projects.length ? '' : ' is-empty'}`}>
+        <div className={`home-grid${visibleProjects.length ? '' : ' is-empty'}`}>
           <Card className="home-import-card" variant="borderless">
-            <div className="home-card-kicker"><TranslatedText text={t.home.newProject} /></div>
-            <Typography.Title level={3}><TranslatedText text={t.home.uploadTitle} /></Typography.Title>
+            <Typography.Title level={3}><TranslatedText text={t.home.newProject} /></Typography.Title>
             <Typography.Text type="secondary"><TranslatedText text={t.home.uploadDesc} /></Typography.Text>
             <Input aria-label={t.workbench.projectName} value={projectNameInput} onChange={(event) => setProjectNameInput(event.target.value)} placeholder={t.home.projectNamePlaceholder} maxLength={200} disabled={uploading || busy || !!session} />
             <div className="upload-file-pickers">
@@ -690,7 +692,7 @@ export function ProjectHome({
             {(error || uploadError) && <Alert type="error" showIcon message={<TranslatedText text={t.common.operationFailed} />} description={error || uploadError} />}
             <div className="home-notes"><span><SafetyOutlined /><TranslatedText text={t.home.featureIntegrity} /></span><span><AimOutlined /><TranslatedText text={t.home.featureMapping} /></span><span><HistoryOutlined /><TranslatedText text={t.home.featurePersistence} /></span></div>
           </Card>
-          <HistoryProjects projects={projects} onOpen={onOpen} onRetry={onRetry} busy={busy} />
+          <HistoryProjects projects={visibleProjects} onOpen={onOpen} onRetry={onRetry} onDelete={onDelete} busy={busy} />
         </div>
       </main>
     </Layout>

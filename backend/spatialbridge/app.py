@@ -244,7 +244,10 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
                     progress_data.update({"completed": int(match.group(1)), "total": int(match.group(2))})
                 store.update_project(project_id, "running", {"stage": stage, "progress": progress_data})
 
-            def execute() -> dict[str, Any]:
+            def execute() -> dict[str, Any] | None:
+                # Skip queued jobs that were soft-deleted before the worker picked them up.
+                if store.get_project(project_id) is None:
+                    return None
                 # The queued state remains visible until the single worker
                 # actually accepts this job.
                 store.update_project(project_id, "running", {
@@ -265,6 +268,8 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
             report = await asyncio.get_running_loop().run_in_executor(
                 processing_pool, execute
             )
+            if report is None:
+                return
             store.update_project(project_id, "ready", {"report": report, "progress": {"stage": "已完成", "completed": 1, "total": 1}})
         except Exception as error:
             logger.exception("Project processing failed: %s", project_id)
@@ -619,7 +624,7 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
         if source_dir is None:
             raise HTTPException(404, "内置示例数据不可用")
         project_id = uuid.uuid4().hex[:12]
-        project, reused = store.get_or_create_active(project_id, str(source_dir), "内置示例", "directory")
+        project, reused = store.get_or_create_active(project_id, str(source_dir), "DEMO", "directory")
         if not reused:
             schedule(work(project_id, source_dir))
         return {**project, "reused": reused}
@@ -655,6 +660,12 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
         if not result:
             raise HTTPException(404, "Project not found")
         return result
+
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(project_id: str) -> dict[str, object]:
+        if not store.delete_project(project_id):
+            raise HTTPException(404, "Project not found")
+        return {"deleted": True, "id": project_id}
 
     @app.get("/api/projects/{project_id}/report")
     def report(project_id: str) -> dict:
@@ -824,7 +835,7 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
                 return {"available": False, "warning": "热图缓存更新失败，请检查参考数据并重新上传热图。"}
         source_dir = demo_source_dir()
         default_image = source_dir / DEMO_HEATMAP if source_dir else None
-        is_demo = (source_dir is not None and project.get("project_name") == "内置示例" and
+        is_demo = (source_dir is not None and project.get("project_name") in {"DEMO", "内置示例"} and
                    Path(project.get("source_dir", "")).expanduser().resolve() == source_dir)
         def needs_default(current: dict) -> bool:
             # A heat map the user added is kept; an earlier built-in default

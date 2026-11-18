@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {Alert, Button, Card, Layout, Progress, Typography} from 'antd';
+import {Alert, Button, Layout, Progress, Typography} from 'antd';
 import {projectName} from '../flow';
 import type {Project} from '../types';
 import {apiUrl} from '../api';
@@ -8,7 +8,7 @@ import {TranslatedText, useI18n} from '../i18n';
 import {AppHeader} from './AppHeader';
 import CubeLoader from './CubeLoader';
 import StatusMark, {type MarkStatus} from './StatusMark';
-import RefineFrame, {type RefineFrameStatus} from './RefineFrame';
+import PixelatedCanvas from './PixelatedCanvas';
 
 function getActiveStepIndex(stage: string, isQueued: boolean): number {
   if (isQueued) return 0;
@@ -31,26 +31,6 @@ function getActiveStepIndex(stage: string, isQueued: boolean): number {
     return 4;
   }
   return 0;
-}
-
-function getRefineStatus(status: string, stage: string): RefineFrameStatus {
-  if (status === 'failed') return 'error';
-  if (status === 'ready') return 'complete';
-  if (status === 'queued') return 'queued';
-  if (
-    stage.includes('配准') ||
-    stage.includes('锚点') ||
-    stage.includes('SBD') ||
-    stage.includes('坐标') ||
-    stage.includes('热图') ||
-    stage.includes('板图') ||
-    stage.includes('弹坑') ||
-    stage.includes('灼烧坑') ||
-    stage.includes('叠加图')
-  ) {
-    return 'refining';
-  }
-  return 'generating';
 }
 
 function localizeBackendStage(rawStage: string, lang: 'zh' | 'en'): string {
@@ -136,7 +116,6 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
   const stage = localizeBackendStage(rawStage, language);
   const isQueued = project.status === 'queued';
   const activeStepIndex = getActiveStepIndex(rawStage, isQueued);
-  const refineStatus = getRefineStatus(project.status, rawStage);
 
   const pipelineSteps = [
     {
@@ -166,18 +145,9 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
     },
   ];
 
-  const refineLabels: Record<RefineFrameStatus, string> = {
-    queued: t.processing.stageQueued,
-    generating: t.processing.stageGenerating,
-    refining: t.processing.stageRefining,
-    complete: t.processing.stageComplete,
-    error: t.processing.stageError,
-  };
-
-  const [previewKey, setPreviewKey] = useState(0);
-  const previewUrl = usePreviewImage(project.id, previewKey);
-
+  const previewUrl = usePreviewImage(project.id);
   const currentProjectName = projectName(project, language);
+  const currentStepNumber = Math.min(pipelineSteps.length, activeStepIndex + 1);
 
   return (
     <Layout className="app processing-app">
@@ -191,125 +161,151 @@ export function ProcessingScreen({project, onHome, connectionError}: {project: P
           tone: isQueued ? 'queued' : 'processing',
         }}
       />
-      <main className="processing-page">
-        <Card className="processing-card" variant="borderless">
-          <div className="processing-loader-header">
-            <CubeLoader label={isQueued ? t.processing.loaderQueued : t.processing.loaderRunning} />
-          </div>
-          <Typography.Paragraph type="secondary">
-            <TranslatedText text={t.processing.loaderDesc} />
-          </Typography.Paragraph>
-
-          <div className="processing-layout">
-            <div className="processing-preview-panel">
-              <div className="processing-preview-title">
-                <span><TranslatedText text={t.processing.previewTitle} /></span>
-                <span className="processing-preview-badge">Refine Preview</span>
+      <main className="processing-workspace">
+        <section className="processing-dock" aria-label={t.processing.pipelineProgress}>
+          <div className="processing-dock-inner">
+            <div className="processing-status-bar">
+              <div className="processing-status-lead">
+                <CubeLoader label={isQueued ? t.processing.loaderQueued : t.processing.loaderRunning} />
+                <Typography.Paragraph type="secondary" className="processing-subtitle">
+                  <TranslatedText text={t.processing.loaderDesc} />
+                </Typography.Paragraph>
               </div>
-              <div className="processing-preview-frame-wrap">
-                <RefineFrame
-                  status={refineStatus}
-                  width={320}
-                  aspectRatio="4 / 3"
-                  labels={refineLabels}
-                  onRetry={() => setPreviewKey((k) => k + 1)}
-                >
-                  {previewUrl && <img src={previewUrl} alt={t.processing.previewAlt} />}
-                </RefineFrame>
-              </div>
-            </div>
 
-            <div className="processing-details-panel">
-              <div className="processing-stage">
-                <div className="processing-stage-main">
-                  <StatusMark
-                    status={isQueued ? 'pending' : 'running'}
-                    progress={hasTotal && percent !== undefined ? percent / 100 : undefined}
-                    size={20}
-                    strokeWidth={2}
-                  />
-                  <div className="processing-stage-text">
-                    <span><TranslatedText text={t.processing.currentStage} /></span>
+              <div className="processing-telemetry">
+                <div className="processing-telemetry-row">
+                  <span className="processing-telemetry-stage">
+                    <StatusMark
+                      status={isQueued ? 'pending' : 'running'}
+                      progress={hasTotal && percent !== undefined ? percent / 100 : undefined}
+                      size={16}
+                      strokeWidth={2}
+                    />
                     <strong><TranslatedText text={stage} /></strong>
+                  </span>
+                  <div className="processing-telemetry-badges">
+                    {hasTotal && (
+                      <em className="processing-telemetry-count">
+                        {Number(progress?.completed)} / {Number(progress?.total)}
+                      </em>
+                    )}
+                    <span className="processing-step-pill">
+                      <TranslatedText text={t.processing.stepCounter(currentStepNumber, pipelineSteps.length)} />
+                    </span>
                   </div>
                 </div>
-                {hasTotal && <em>{Number(progress?.completed)} / {Number(progress?.total)}</em>}
-              </div>
-
-              {hasTotal && <Progress percent={percent} showInfo strokeColor="#2d6a5b" />}
-              {!hasTotal && (
-                <div className="processing-indeterminate">
-                  <div className="processing-indeterminate-bar" aria-hidden="true">
-                    <span />
-                  </div>
-                  <span><TranslatedText text={t.processing.autoEnter} /></span>
-                </div>
-              )}
-
-              <div className="processing-steps">
-                <div className="processing-steps-header">
-                  <span className="processing-steps-title"><TranslatedText text={t.processing.pipelineProgress} /></span>
-                </div>
-                <div className="processing-steps-list">
-                  {pipelineSteps.map((step, idx) => {
-                    let stepStatus: MarkStatus = 'pending';
-                    let stepProgress: number | undefined = undefined;
-
-                    if (isQueued) {
-                      stepStatus = 'pending';
-                    } else if (idx < activeStepIndex) {
-                      stepStatus = 'done';
-                    } else if (idx === activeStepIndex) {
-                      stepStatus = 'running';
-                      if (idx === 1 && hasTotal && percent !== undefined) {
-                        stepProgress = percent / 100;
-                      }
-                    } else {
-                      stepStatus = 'pending';
-                    }
-
-                    const isActive = !isQueued && idx === activeStepIndex;
-
-                    return (
-                      <div key={step.id} className={`processing-step-item step-${stepStatus}`}>
-                        <div className="processing-step-mark">
-                          <StatusMark
-                            status={stepStatus}
-                            progress={stepProgress}
-                            size={18}
-                            strokeWidth={2}
-                          />
-                        </div>
-                        <div className="processing-step-content">
-                          <div className="processing-step-title-row">
-                            <span className="processing-step-name"><TranslatedText text={step.title} /></span>
-                            {isActive && hasTotal && (
-                              <span className="processing-step-count">
-                                {Number(progress?.completed)} / {Number(progress?.total)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="processing-step-desc">
-                            {isActive ? stage : step.description}
-                          </div>
-                        </div>
+                <div className="processing-telemetry-meter">
+                  {hasTotal ? (
+                    <Progress percent={percent} showInfo strokeColor="#2d6a5b" trailColor="#dce8e2" size="small" />
+                  ) : (
+                    <div className="processing-indeterminate">
+                      <div className="processing-indeterminate-bar" aria-hidden="true">
+                        <span />
                       </div>
-                    );
-                  })}
+                      <span><TranslatedText text={t.processing.autoEnter} /></span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
 
-          {connectionError && (
-            <Alert
-              type="warning"
-              showIcon
-              message={<TranslatedText text={t.processing.disconnectedTitle} />}
-              description={<TranslatedText text={t.processing.disconnectedDesc} />}
-            />
-          )}
-        </Card>
+            <div className="processing-pipeline-rail">
+              {pipelineSteps.map((step, idx) => {
+                let stepStatus: MarkStatus = 'pending';
+                let stepProgress: number | undefined = undefined;
+
+                if (isQueued) {
+                  stepStatus = 'pending';
+                } else if (idx < activeStepIndex) {
+                  stepStatus = 'done';
+                } else if (idx === activeStepIndex) {
+                  stepStatus = 'running';
+                  if (idx === 1 && hasTotal && percent !== undefined) {
+                    stepProgress = percent / 100;
+                  }
+                } else {
+                  stepStatus = 'pending';
+                }
+
+                const isActive = !isQueued && idx === activeStepIndex;
+
+                return (
+                  <div key={step.id} className={`processing-rail-step step-${stepStatus}`}>
+                    <div className="processing-rail-head">
+                      <span className="processing-rail-mark">
+                        <StatusMark
+                          status={stepStatus}
+                          progress={stepProgress}
+                          size={17}
+                          strokeWidth={2}
+                        />
+                      </span>
+                      <span className="processing-rail-line" aria-hidden="true" />
+                    </div>
+                    <div className="processing-rail-body">
+                      <div className="processing-rail-title-row">
+                        <span className="processing-rail-name"><TranslatedText text={step.title} /></span>
+                        {isActive && hasTotal && (
+                          <span className="processing-rail-count">
+                            {Number(progress?.completed)} / {Number(progress?.total)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="processing-rail-desc">
+                        {isActive ? stage : step.description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {connectionError && (
+              <Alert
+                className="processing-connection-alert"
+                type="warning"
+                showIcon
+                message={<TranslatedText text={t.processing.disconnectedTitle} />}
+                description={<TranslatedText text={t.processing.disconnectedDesc} />}
+              />
+            )}
+          </div>
+        </section>
+
+        <section className="processing-canvas-area" aria-label={t.processing.previewTitle}>
+          <div className="processing-canvas-viewport">
+            {previewUrl ? (
+              <PixelatedCanvas
+                src={previewUrl}
+                cellSize={4}
+                dotScale={0.9}
+                shape="square"
+                backgroundColor="transparent"
+                dropoutStrength={0.08}
+                interactive
+                distortionStrength={0.1}
+                distortionRadius={260}
+                distortionMode="repel"
+                followSpeed={0.2}
+                jitterStrength={4}
+                jitterSpeed={1}
+                sampleAverage
+                responsive
+                fillHeight
+                objectFit="contain"
+                maxWidth={1680}
+                maxHeight={760}
+                className="processing-canvas-surface"
+                ariaLabel={t.processing.previewAlt}
+              />
+            ) : (
+              <div className="processing-canvas-placeholder">
+                <StatusMark status="running" size={20} strokeWidth={2} />
+                <span><TranslatedText text={t.processing.previewLoading} /></span>
+              </div>
+            )}
+          </div>
+        </section>
       </main>
     </Layout>
   );
@@ -329,17 +325,7 @@ export function FailedProjectScreen({
   error?: string;
 }) {
   const {t, language} = useI18n();
-  const localThumb = getCachedPreviewThumbnail(project.id);
-  const previewUrl = localThumb || apiUrl(`/projects/${encodeURIComponent(project.id)}/preview/pre?thumb=1`);
-
-  const refineLabels: Record<RefineFrameStatus, string> = {
-    queued: t.processing.stageQueued,
-    generating: t.processing.stageGenerating,
-    refining: t.processing.stageRefining,
-    complete: t.processing.stageComplete,
-    error: t.processing.stageError,
-  };
-
+  const previewUrl = usePreviewImage(project.id);
   const currentProjectName = projectName(project, language);
 
   return (
@@ -354,50 +340,70 @@ export function FailedProjectScreen({
           tone: 'error',
         }}
       />
-      <main className="processing-page">
-        <Card className="processing-card failed-card" variant="borderless">
-          <div className="processing-layout">
-            <div className="processing-preview-panel">
-              <div className="processing-preview-title">
-                <span><TranslatedText text={t.processing.previewAlt} /></span>
-                <span className="processing-preview-badge" style={{color: '#dc2626', background: '#fee2e2'}}>
-                  <TranslatedText text={t.processing.interruptedTag} />
-                </span>
+      <main className="processing-workspace">
+        <section className="processing-dock processing-dock--failed">
+          <div className="processing-dock-inner">
+            <div className="processing-failed-bar">
+              <div className="processing-failed-lead">
+                <div className="processing-icon failed">
+                  <StatusMark status="failed" size={22} strokeWidth={2.5} errorColor="#b45309" />
+                </div>
+                <div className="processing-failed-copy">
+                  <Typography.Title level={3} className="processing-failed-title">
+                    <TranslatedText text={t.processing.errorTitle} />
+                  </Typography.Title>
+                  <Typography.Paragraph type="secondary" className="processing-subtitle">
+                    <TranslatedText text={project.error || t.processing.errorFallback} />
+                  </Typography.Paragraph>
+                </div>
               </div>
-              <div className="processing-preview-frame-wrap">
-                <RefineFrame
-                  status="error"
-                  width={320}
-                  aspectRatio="4 / 3"
-                  labels={refineLabels}
-                  onRetry={onRetry}
-                >
-                  <img
-                    src={previewUrl}
-                    alt={t.processing.previewAlt}
-                    crossOrigin="anonymous"
-                  />
-                </RefineFrame>
-              </div>
-            </div>
-
-            <div className="processing-details-panel">
-              <div className="processing-icon failed">
-                <StatusMark status="failed" size={24} strokeWidth={2.5} errorColor="#b45309" />
-              </div>
-              <Typography.Title level={2}><TranslatedText text={t.processing.errorTitle} /></Typography.Title>
-              <Typography.Paragraph type="secondary">
-                <TranslatedText text={project.error || t.processing.errorFallback} />
-              </Typography.Paragraph>
-              {error && <Alert type="error" showIcon message={<TranslatedText text={t.processing.retryFailed} />} description={error} />}
-              <div className="processing-actions">
+              <div className="processing-failed-actions">
                 <Button type="primary" loading={busy} disabled={busy || !project.source_dir} onClick={onRetry}>
                   <TranslatedText text={t.processing.btnReprocess} />
                 </Button>
               </div>
             </div>
+            {error && (
+              <Alert
+                className="processing-connection-alert"
+                type="error"
+                showIcon
+                message={<TranslatedText text={t.processing.retryFailed} />}
+                description={error}
+              />
+            )}
           </div>
-        </Card>
+        </section>
+
+        <section className="processing-canvas-area processing-canvas-area--failed" aria-label={t.processing.previewAlt}>
+          <div className="processing-canvas-viewport">
+            {previewUrl ? (
+              <PixelatedCanvas
+                src={previewUrl}
+                cellSize={4}
+                dotScale={0.9}
+                shape="square"
+                backgroundColor="transparent"
+                dropoutStrength={0.12}
+                grayscale
+                interactive={false}
+                sampleAverage
+                responsive
+                fillHeight
+                objectFit="contain"
+                maxWidth={1680}
+                maxHeight={760}
+                className="processing-canvas-surface"
+                ariaLabel={t.processing.previewAlt}
+              />
+            ) : (
+              <div className="processing-canvas-placeholder">
+                <StatusMark status="failed" size={20} strokeWidth={2} errorColor="#b45309" />
+                <span><TranslatedText text={t.processing.interruptedTag} /></span>
+              </div>
+            )}
+          </div>
+        </section>
       </main>
     </Layout>
   );

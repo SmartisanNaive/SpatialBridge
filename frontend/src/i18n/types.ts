@@ -110,6 +110,9 @@ export interface Translations {
     count: (count: number) => string;
     noPreview: string;
     spotsUnit: (count: string) => string;
+    deleteRecord: string;
+    deleteConfirmTitle: string;
+    deleteConfirmOk: string;
   };
   processing: {
     step1Title: string;
@@ -136,6 +139,10 @@ export interface Translations {
     loaderDesc: string;
     previewTitle: string;
     previewAlt: string;
+    previewFullView: string;
+    previewInteractiveHint: string;
+    previewLoading: string;
+    stepCounter: (current: number, total: number) => string;
     currentStage: string;
     autoEnter: string;
     pipelineProgress: string;

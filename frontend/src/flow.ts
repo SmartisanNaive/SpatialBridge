@@ -15,7 +15,9 @@ export function parseRoute(hash?: string): AppRoute {
 }
 
 export function projectName(project: ProjectLike, lang: 'zh' | 'en' = 'zh') {
-  if (project.project_name?.trim()) return project.project_name.trim();
+  const name = project.project_name?.trim();
+  if (name === '内置示例') return 'DEMO';
+  if (name) return name;
   const source = project.source_dir?.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
   return source || (lang === 'en' ? `Project ${project.id.slice(0, 8)}` : `项目 ${project.id.slice(0, 8)}`);
 }

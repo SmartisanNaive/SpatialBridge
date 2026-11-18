@@ -5,6 +5,10 @@
 <h1 align="center">SpatialBridge</h1>
 
 <p align="center">
+  <strong>见微，知质。</strong> · <em>Bridge sight and spectrum.</em>
+</p>
+
+<p align="center">
   采集前/采集后显微图与 MALDI 空间数据的自动配准与联动查看工具
 </p>
 

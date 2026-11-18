@@ -18,13 +18,14 @@ import {
 } from 'antd';
 import {
   AimOutlined,
+  AppstoreOutlined,
   CheckCircleFilled,
   CloseOutlined,
   CompressOutlined,
   DownloadOutlined,
-  EyeOutlined,
   FileSearchOutlined,
   FolderOpenOutlined,
+  HeatMapOutlined,
   HomeOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -673,7 +674,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               <Tooltip title={<TranslatedText text={t.workbench.collapseSidebar} />}><button type="button" className="icon-button" onClick={() => setSidebarOpen(false)} aria-label={t.workbench.collapseSidebar}><MenuFoldOutlined /></button></Tooltip>
             </div>
             <section className="control-section project-summary">
-              <div className="section-heading"><span><TranslatedText text={t.workbench.projectInfo} /></span><span className="section-meta"><TranslatedText text={t.workbench.readOnly} /></span></div>
+              <div className="section-heading"><span><TranslatedText text={t.workbench.projectInfo} /></span></div>
               <div className="summary-row"><span><TranslatedText text={t.workbench.projectName} /></span><strong title={projectLabel}><TranslatedText text={projectLabel} /></strong></div>
               {!mappingSuccess && <div className="summary-row"><span><TranslatedText text={t.workbench.regStatus} /></span><strong className="summary-muted"><TranslatedText text={mapping?.available ? t.workbench.pendingReview : report?.maldi_data?.available ? t.workbench.sbdReadNotMapped : t.workbench.noMassSpecData} /></strong></div>}
               <div className="summary-row"><span><TranslatedText text={t.workbench.sbdSpots} /></span><strong>{report?.maldi_data?.spot_count?.toLocaleString() ?? '—'}</strong></div>
@@ -705,7 +706,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
 
             <section className="control-section">
               <div className="section-heading"><span><TranslatedText text={t.workbench.layerOverlay} /></span></div>
-              <div className="switch-row"><span><EyeOutlined /> <TranslatedText text={t.workbench.samplingGrid} /></span><Switch size="small" checked={showGrid} onChange={setShowGrid} /></div>
+              <div className="switch-row"><span><AppstoreOutlined /> <TranslatedText text={t.workbench.samplingGrid} /></span><Switch size="small" checked={showGrid} onChange={setShowGrid} /></div>
               <div className="switch-row"><span><AimOutlined /> <TranslatedText text={t.workbench.burnPits} /> <em>{autoPitTotal.toLocaleString()}</em></span><Switch size="small" checked={showPits} onChange={setShowPits} disabled={!maldiAvailable} /></div>
               <div className="parameter-block opacity-block"><div className="parameter-label"><span><TranslatedText text={t.workbench.layerOpacity} /></span><span className="parameter-value">{overlayOpacity}%</span></div><Slider min={0} max={100} value={overlayOpacity} onChange={setOverlayOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
               {!maldiAvailable && <div className="sidebar-empty-note"><TranslatedText text={report?.maldi_data?.available
@@ -722,7 +723,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
               ) : <div className="sidebar-empty-note"><TranslatedText text={heatmap?.warning || t.workbench.noHeatmap} /></div>}
               {heatmapError && <Alert type="error" showIcon message={heatmapError} />}
               {heatmap?.available && <>
-                <div className="switch-row"><span><EyeOutlined /> <TranslatedText text={t.workbench.showHeatmap} /></span><Switch size="small" checked={showHeatmap} onChange={setShowHeatmap} disabled={!heatmapColors.size} /></div>
+                <div className="switch-row"><span><HeatMapOutlined /> <TranslatedText text={t.workbench.showHeatmap} /></span><Switch size="small" checked={showHeatmap} onChange={setShowHeatmap} disabled={!heatmapColors.size} /></div>
                 <div className="parameter-block opacity-block"><div className="parameter-label"><span><TranslatedText text={t.workbench.heatmapOpacity} /></span><span className="parameter-value">{heatmapOpacity}%</span></div><Slider min={0} max={100} value={heatmapOpacity} onChange={setHeatmapOpacity} tooltip={{formatter: (value) => `${value}%`}} /></div>
               </>}
               <Collapse className="sidebar-collapse" ghost items={[{

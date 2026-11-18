@@ -5,6 +5,10 @@
 <h1 align="center">SpatialBridge</h1>
 
 <p align="center">
+  <strong>Bridge sight and spectrum.</strong>
+</p>
+
+<p align="center">
   Automatic registration and linked viewing of pre/post-acquisition microscopy and MALDI spatial data
 </p>
 

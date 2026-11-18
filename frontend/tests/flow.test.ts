@@ -11,6 +11,7 @@ test('hash routes preserve project ids and fall back to home', () => {
 test('project summaries use the source directory and explicit status labels', () => {
   assert.equal(projectName({id: '123456789', source_dir: '/tmp/sample-data', status: 'ready'}), 'sample-data');
   assert.equal(projectName({id: '123456789', project_name: '上传项目', source_dir: '/tmp/upload-id', status: 'ready'}), '上传项目');
+  assert.equal(projectName({id: '123456789', project_name: '内置示例', source_dir: '/tmp/sample-data', status: 'ready'}), 'DEMO');
   assert.equal(projectName({id: '123456789', status: 'ready'}), '项目 12345678');
   assert.equal(projectName({id: '123456789', status: 'ready'}, 'en'), 'Project 12345678');
   assert.equal(projectStatusLabel('queued'), '排队中');

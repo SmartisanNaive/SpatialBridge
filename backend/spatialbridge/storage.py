@@ -23,6 +23,7 @@ class Store:
         self._ensure_column("projects", "project_name", "TEXT")
         self._ensure_column("projects", "import_type", "TEXT NOT NULL DEFAULT 'directory'")
         self._ensure_column("projects", "upload_id", "TEXT")
+        self._ensure_column("projects", "deleted_at", "TEXT")
         self.db.execute("""CREATE TABLE IF NOT EXISTS uploads (
           id TEXT PRIMARY KEY, created_at TEXT NOT NULL, project_name TEXT,
           status TEXT NOT NULL, completed_project_id TEXT, manifest TEXT,
@@ -90,6 +91,8 @@ class Store:
             result["import_type"] = row["import_type"] or "directory"
         if "upload_id" in row.keys() and row["upload_id"]:
             result["upload_id"] = row["upload_id"]
+        if "deleted_at" in row.keys() and row["deleted_at"]:
+            result["deleted_at"] = row["deleted_at"]
         return result
 
     def create_project(self, project_id: str, source_dir: str, project_name: str | None = None,
@@ -106,8 +109,8 @@ class Store:
         """Return the newest in-flight project for a normalized source path."""
         with self._lock:
             row = self.db.execute(
-                "SELECT * FROM projects WHERE source_dir=? AND status IN ('queued', 'running') "
-                "ORDER BY created_at DESC LIMIT 1",
+                "SELECT * FROM projects WHERE source_dir=? AND deleted_at IS NULL "
+                "AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
                 (source_dir,),
             ).fetchone()
         if row is None:
@@ -120,8 +123,8 @@ class Store:
         with self._lock:
             self.db.execute("BEGIN IMMEDIATE")
             row = self.db.execute(
-                "SELECT * FROM projects WHERE source_dir=? AND status IN ('queued', 'running') "
-                "ORDER BY created_at DESC LIMIT 1",
+                "SELECT * FROM projects WHERE source_dir=? AND deleted_at IS NULL "
+                "AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
                 (source_dir,),
             ).fetchone()
             if row is not None:
@@ -146,17 +149,31 @@ class Store:
             self.db.execute("UPDATE projects SET status=?, payload=? WHERE id=?", (status, json.dumps(payload), project_id))
             self.db.commit()
 
-    def get_project(self, project_id: str) -> dict[str, Any] | None:
+    def get_project(self, project_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
+        query = "SELECT * FROM projects WHERE id=?" if include_deleted else "SELECT * FROM projects WHERE id=? AND deleted_at IS NULL"
         with self._lock:
-            row = self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+            row = self.db.execute(query, (project_id,)).fetchone()
         if row is None:
             return None
         return self._project_from_row(row)
 
-    def list_projects(self) -> list[dict[str, Any]]:
+    def list_projects(self, include_deleted: bool = False) -> list[dict[str, Any]]:
+        query = ("SELECT * FROM projects ORDER BY created_at DESC"
+                 if include_deleted
+                 else "SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC")
         with self._lock:
-            rows = self.db.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
+            rows = self.db.execute(query).fetchall()
         return [self._project_from_row(r) for r in rows]
+
+    def delete_project(self, project_id: str) -> bool:
+        """Soft-delete a project record without deleting any files on disk."""
+        with self._lock:
+            cursor = self.db.execute(
+                "UPDATE projects SET deleted_at=? WHERE id=? AND deleted_at IS NULL",
+                (datetime.now(timezone.utc).isoformat(), project_id),
+            )
+            self.db.commit()
+            return cursor.rowcount == 1
 
     def create_upload(self, upload_id: str, project_name: str | None, files: list[dict[str, Any]]) -> dict[str, Any]:
         created = datetime.now(timezone.utc)
