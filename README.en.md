@@ -69,7 +69,7 @@ npm --prefix frontend run build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-Open `http://127.0.0.1:8000`. The same process serves the frontend and API; rebuild the frontend and restart the service after frontend changes. Developers needing hot reload can optionally run a separate Vite service; see the [development/deployment instructions](docs/deployment.md#24-可选vite-开发服务) (Chinese).
+Use `http://127.0.0.1:8000` for development, everyday use and deployment. One process serves the frontend, API, tiles and downloads. `serve` defaults to `frontend/dist`; the command above specifies that directory explicitly. After frontend changes, rebuild and refresh the browser; after backend changes, restart the service. See [updating code during development](docs/deployment.md#24-开发时更新代码) (Chinese).
 
 If a `参考数据/` sample directory exists in the repository root, click “载入内置示例” (load built-in demo) to try the full workflow. Sample data is not distributed with the repository.
 

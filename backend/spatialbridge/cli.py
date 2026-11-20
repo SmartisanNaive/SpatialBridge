@@ -14,7 +14,10 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve", help="Run the SpatialBridge web application")
     serve.add_argument("--data-dir", type=Path, default=Path("workspace-data"))
-    serve.add_argument("--frontend-dir", type=Path)
+    serve.add_argument(
+        "--frontend-dir", type=Path, default=Path("frontend/dist"),
+        help="Built frontend directory (default: frontend/dist; run npm --prefix frontend run build first)",
+    )
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     check = commands.add_parser("register", help="Run registration and save a report")

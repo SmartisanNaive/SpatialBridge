@@ -111,7 +111,7 @@ npm --prefix frontend run build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-访问 `http://127.0.0.1:8000`，验证处理预览、配准图层、点位详情和光谱数值。新项目应保存完整 SBD，不经 `.sbdx` 自动替换。现有 PNG 热图图片配准和 SBD 离子提取分别验收；点位归一化因子不能作为原始离子强度验证依据。可选 Vite 开发方式见[部署文档](deployment.md#24-可选vite-开发服务)。
+访问 `http://127.0.0.1:8000`，验证处理预览、配准图层、点位详情和光谱数值。新项目应保存完整 SBD，不经 `.sbdx` 自动替换。现有 PNG 热图图片配准和 SBD 离子提取分别验收；点位归一化因子不能作为原始离子强度验证依据。开发时也使用同一 8000 入口；前端改动后重新构建并刷新页面，后端改动后重启服务，见[部署文档](deployment.md#24-开发时更新代码)。
 
 ## 4. Git 提交与版本控制规范
 

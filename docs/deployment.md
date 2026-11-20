@@ -6,7 +6,7 @@ SpatialBridge 默认以一个应用进程在 8000 端口提供前端和 API：
 
 - **本地运行**：先构建前端，再启动带 `--frontend-dir frontend/dist` 的应用服务。
 - **容器部署**：Docker Compose 或 Apple Container 将前后端一体化打包。
-- **可选开发方式**：需要前端热更新时，另启 Vite；日常使用无需两个服务。
+- **本地开发**：同样使用 8000 入口；前端改动后重新构建并刷新页面，后端改动后重启应用服务。
 
 FastAPI 在同一 HTTP 端口提供前端生产静态页面、`/api` REST 接口、动态图像瓦片、验证叠加图和 CSV 下载，浏览器使用同源地址，不依赖客户端电脑的本地后端。
 
@@ -28,7 +28,7 @@ FastAPI 在同一 HTTP 端口提供前端生产静态页面、`/api` REST 接口
 
 ## 2. 本地原生运行
 
-以下步骤从项目根目录执行，适用于日常使用与本地验收。需要热重载时再选择 Vite 开发方式。
+以下步骤从项目根目录执行，开发、日常使用与本地验收均使用同一单进程、单端口方式。
 
 ### 2.1 环境准备
 
@@ -67,25 +67,25 @@ npm --prefix frontend run build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-打开 `http://127.0.0.1:8000`。同一进程提供生产静态页面、API、光谱、图像瓦片与下载，无需另开前端服务。修改前端后重新构建并重启。`serve --help` 可核对 `--data-dir`、`--frontend-dir`、`--host`、`--port` 参数；需要局域网访问时加 `--host 0.0.0.0`。
+打开 `http://127.0.0.1:8000`。同一进程提供生产静态页面、API、光谱、图像瓦片与下载。`serve` 默认读取项目根目录下的 `frontend/dist`，也可通过 `--frontend-dir` 指定其他构建目录；首次启动前必须完成前端构建。`serve --help` 可核对 `--data-dir`、`--frontend-dir`、`--host`、`--port` 参数；需要局域网访问时加 `--host 0.0.0.0`。
 
-### 2.4 可选：Vite 开发服务
+### 2.4 开发时更新代码
 
-仅在调试前端、需要热更新时使用两个终端：
-
-```bash
-# 终端 1：后端
-.venv/bin/spatialbridge serve --data-dir ./workspace-data --port 8000
-
-# 终端 2：Vite
-npm --prefix frontend run dev
-```
-
-开发入口为 `http://localhost:5173`，`/api` 默认代理至 `127.0.0.1:8000`。其他后端地址可通过环境变量指定：
+保持一体化服务运行，在另一个终端从项目根目录重新构建前端：
 
 ```bash
-SPATIALBRIDGE_API_URL=http://192.168.1.100:8000 npm --prefix frontend run dev
+npm --prefix frontend run build
 ```
+
+构建结束后刷新 `http://127.0.0.1:8000`，应用会读取更新后的静态文件，无需为前端改动重启 Python 服务。此方式需要手动构建和刷新，不提供 Vite 热更新。
+
+修改后端 Python 代码后，在运行服务的终端按 `Ctrl+C`，再执行原启动命令：
+
+```bash
+.venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
+```
+
+容器中的代码更新需要重新构建镜像并更新容器，见[服务升级](#61-服务升级与平滑重启)。
 
 ### 2.5 离线批处理 CLI
 

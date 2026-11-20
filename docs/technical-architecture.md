@@ -13,7 +13,7 @@ npm --prefix frontend run build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-Vite 是可选开发工具，见[部署与运维](deployment.md)。
+本地开发同样使用 8000 入口。Vite 负责构建前端资源；修改前端后重新构建并刷新浏览器，修改后端后重启应用，见[开发时更新代码](deployment.md#24-开发时更新代码)。
 
 ```mermaid
 flowchart TD

@@ -6,10 +6,14 @@
 
 ```bash
 uv sync --extra tiles --extra dev
-cd frontend && npm install
+npm --prefix frontend install
+npm --prefix frontend run build
+.venv/bin/spatialbridge serve --data-dir ./workspace-data --port 8000
 ```
 
-后端在 `http://127.0.0.1:8000` 运行（`uv run spatialbridge serve --data-dir ./workspace-data`），前端开发服务器（`npm run dev`）会把 `/api` 代理过去。后端在其他地址时，用环境变量 `SPATIALBRIDGE_API_URL` 覆盖代理目标。
+以上命令均从项目根目录执行。开发、日常使用和部署统一访问 `http://127.0.0.1:8000`，一个应用进程提供页面、API、瓦片和下载。`serve` 默认读取 `frontend/dist`，自定义构建目录可用 `--frontend-dir` 指定。
+
+修改前端后执行 `npm --prefix frontend run build`，然后刷新浏览器；修改后端 Python 代码后重启应用服务。完整流程见[部署文档](docs/deployment.md#24-开发时更新代码)。
 
 ## 测试
 

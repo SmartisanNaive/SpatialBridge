@@ -69,7 +69,7 @@ npm --prefix frontend run build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-打开 `http://127.0.0.1:8000`。前端与 API 由同一个进程提供；修改前端后重新构建并重启服务。需要热更新的开发者可选用独立 Vite 服务，见[开发与部署说明](docs/deployment.md#24-可选vite-开发服务)。
+开发、日常使用和部署统一打开 `http://127.0.0.1:8000`，前端、API、瓦片和下载由同一个进程提供。`serve` 默认读取 `frontend/dist`，上面的 `--frontend-dir` 用于显式指定该目录。修改前端后重新构建并刷新浏览器；修改后端代码后重启服务。详见[开发时更新代码](docs/deployment.md#24-开发时更新代码)。
 
 如果项目根目录下有 `参考数据/` 示例目录，可点击「载入内置示例」体验完整流程。示例数据不随仓库发布。
 
