@@ -1,5 +1,9 @@
+name: spatialbridge
+
 services:
   spatialbridge:
+    image: spatialbridge:local
+    container_name: spatialbridge
     build:
       context: .
       dockerfile: Dockerfile.api

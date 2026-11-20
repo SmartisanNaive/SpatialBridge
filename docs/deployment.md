@@ -99,7 +99,7 @@ uv run spatialbridge register --source-dir ./参考数据 --output-dir ./workspa
 
 ## 3. 容器部署指南
 
-SpatialBridge 提供了基于 [Dockerfile.api](../Dockerfile.api) 的前后端一体化多阶段构建镜像（前端编译产物直接注入 FastAPI 静态分发层）。
+SpatialBridge 提供了基于 [Dockerfile.api](../Dockerfile.api) 的前后端一体化多阶段构建镜像（前端编译产物直接注入 FastAPI 静态分发层）。Compose 项目名和容器名统一为 `spatialbridge`，完整应用镜像统一为 `spatialbridge:local`，与下面的 Apple Container 命令保持一致。容器镜像名称使用小写；产品名称仍为 SpatialBridge。
 
 ### 3.1 方案一：Linux 服务器生产部署（Docker Compose）
 
