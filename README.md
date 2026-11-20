@@ -16,7 +16,7 @@
   <a href="https://github.com/SmartisanNaive/SpatialBridge/actions/workflows/ci.yml"><img src="https://github.com/SmartisanNaive/SpatialBridge/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB.svg" alt="Python 3.11+" />
-  <img src="https://img.shields.io/badge/node-22%2B-339933.svg" alt="Node.js 22+" />
+  <img src="https://img.shields.io/badge/Bun-1.4.4-14151A.svg" alt="Bun 1.4.4" />
 </p>
 
 <p align="center">
@@ -55,7 +55,7 @@ SpatialBridge 将显微图中的激光采样位置与 SCiLS SBD 点位对应起�
 ### 环境要求
 
 - Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)
-- Node.js 22+ 和 npm
+- [Bun](https://bun.sh/) 1.4.4（与 CI、Docker 构建保持一致，无需单独安装 Node.js）
 - 可选：[libvips](https://www.libvips.org/)（配合 `--extra tiles` 加速大图处理）、[Tesseract](https://github.com/tesseract-ocr/tesseract)（读取热图上的 m/z 标签）
 
 ### 本地运行
@@ -64,8 +64,8 @@ SpatialBridge 将显微图中的激光采样位置与 SCiLS SBD 点位对应起�
 
 ```bash
 uv sync --extra tiles --extra dev
-npm --prefix frontend install
-npm --prefix frontend run build
+bun install --cwd frontend --frozen-lockfile
+bun run --cwd frontend build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
@@ -74,7 +74,7 @@ npm --prefix frontend run build
 如果项目根目录下有 `参考数据/` 示例目录，可点击「载入内置示例」体验完整流程。示例数据不随仓库发布。
 
 > [!NOTE]
-> uv 创建的 `.venv` 记录了绝对路径。移动或重命名项目目录后，删除 `.venv` 并重新执行 `uv sync --extra tiles --extra dev`；`frontend/node_modules` 同理用 `npm --prefix frontend install` 重建。
+> uv 创建的 `.venv` 记录了绝对路径。移动或重命名项目目录后，删除 `.venv` 并重新执行 `uv sync --extra tiles --extra dev`；`frontend/node_modules` 同理用 `bun install --cwd frontend --frozen-lockfile` 重建。
 
 ### 命令行与测试
 
@@ -87,8 +87,8 @@ npm --prefix frontend run build
 
 # 常规检查；真实 SBD 测试默认跳过
 .venv/bin/python -m pytest -q
-npm --prefix frontend test
-npm --prefix frontend run build
+bun run --cwd frontend test
+bun run --cwd frontend build
 ```
 
 数据库、上传分片、报告和缓存写在 `--data-dir` 下。目录导入和本地关联仍依赖外部来源路径；迁移时需同时保留或重新关联来源文件。
@@ -121,7 +121,7 @@ sudo docker compose up -d --build
 ```text
 .
 ├── backend/spatialbridge/   FastAPI：配准、晶格、热图、质谱、瓦片、存储、CLI
-├── frontend/               React + Vite + OpenSeadragon 前端与 node:test 测试
+├── frontend/               React + Vite + OpenSeadragon 前端与 Bun 测试
 ├── tests/                  后端 pytest
 ├── docs/                   文档与配图
 ├── Dockerfile.api          前后端一体化镜像

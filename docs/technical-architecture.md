@@ -9,7 +9,7 @@ SpatialBridge 的空间配准与质谱读取共用项目和 SBD 点位编号。�
 浏览器使用 React、OpenSeadragon 和 Canvas；FastAPI 同时提供生产前端、API、瓦片、处理预览与 CSV。常规运行只有一个应用进程：
 
 ```bash
-npm --prefix frontend run build
+bun run --cwd frontend build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 

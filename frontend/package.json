@@ -4,14 +4,16 @@
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
+  "packageManager": "bun@1.4.4",
+  "engines": {
+    "bun": ">=1.4.4"
+  },
   "scripts": {
-    "predev": "node scripts/copy-osd-images.mjs",
-    "dev": "vite",
-    "prebuild": "node scripts/copy-osd-images.mjs",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "preview": "vite preview",
-    "test:flow": "node --experimental-strip-types --test tests/flow.test.ts tests/pointer-gesture.test.ts tests/hash.test.ts tests/compress.test.ts tests/sbd-package.test.ts tests/png.test.ts tests/grid-detail.test.ts tests/i18n.test.ts",
-    "test": "npm run test:flow"
+    "dev": "bun scripts/copy-osd-images.mjs && bun --bun vite",
+    "build": "bun scripts/copy-osd-images.mjs && bun --bun tsc -p tsconfig.json --noEmit && bun --bun vite build",
+    "preview": "bun --bun vite preview",
+    "test:flow": "bun test ./tests",
+    "test": "bun run test:flow"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.0",

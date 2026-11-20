@@ -26,11 +26,9 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run build

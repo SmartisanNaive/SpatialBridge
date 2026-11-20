@@ -16,7 +16,7 @@
   <a href="https://github.com/SmartisanNaive/SpatialBridge/actions/workflows/ci.yml"><img src="https://github.com/SmartisanNaive/SpatialBridge/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB.svg" alt="Python 3.11+" />
-  <img src="https://img.shields.io/badge/node-22%2B-339933.svg" alt="Node.js 22+" />
+  <img src="https://img.shields.io/badge/Bun-1.4.4-14151A.svg" alt="Bun 1.4.4" />
 </p>
 
 <p align="center">
@@ -55,7 +55,7 @@ When a full SBD is available, the file-path editor stays hidden. Legacy compact-
 ### Requirements
 
 - Python 3.11+ and [uv](https://docs.astral.sh/uv/)
-- Node.js 22+ and npm
+- [Bun](https://bun.sh/) 1.4.4 (matching CI and Docker builds; no separate Node.js installation needed)
 - Optional: [libvips](https://www.libvips.org/) (faster large-image processing with `--extra tiles`) and [Tesseract](https://github.com/tesseract-ocr/tesseract) (reads m/z labels on heat maps)
 
 ### Run locally
@@ -64,8 +64,8 @@ Run from the repository root:
 
 ```bash
 uv sync --extra tiles --extra dev
-npm --prefix frontend install
-npm --prefix frontend run build
+bun install --cwd frontend --frozen-lockfile
+bun run --cwd frontend build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
@@ -74,7 +74,7 @@ Use `http://127.0.0.1:8000` for development, everyday use and deployment. One pr
 If a `参考数据/` sample directory exists in the repository root, click “载入内置示例” (load built-in demo) to try the full workflow. Sample data is not distributed with the repository.
 
 > [!NOTE]
-> uv's `.venv` records absolute paths. After moving or renaming the project directory, delete `.venv` and run `uv sync --extra tiles --extra dev` again. Rebuild `frontend/node_modules` with `npm --prefix frontend install` as needed.
+> uv's `.venv` records absolute paths. After moving or renaming the project directory, delete `.venv` and run `uv sync --extra tiles --extra dev` again. Rebuild `frontend/node_modules` with `bun install --cwd frontend --frozen-lockfile` as needed.
 
 ### Command line and tests
 
@@ -87,8 +87,8 @@ If a `参考数据/` sample directory exists in the repository root, click “�
 
 # Routine checks; real-SBD testing is skipped by default
 .venv/bin/python -m pytest -q
-npm --prefix frontend test
-npm --prefix frontend run build
+bun run --cwd frontend test
+bun run --cwd frontend build
 ```
 
 The database, upload chunks, reports and caches live under `--data-dir`. Directory imports and locally linked SBDs still depend on external source paths; preserve or relink those files when migrating.
@@ -121,7 +121,7 @@ See [docs/README.md](docs/README.md) for the full index. Detailed guides are in 
 ```text
 .
 ├── backend/spatialbridge/   FastAPI: registration, lattice, heat map, spectra, tiles, storage, CLI
-├── frontend/               React + Vite + OpenSeadragon frontend and node:test tests
+├── frontend/               React + Vite + OpenSeadragon frontend and Bun tests
 ├── tests/                  Backend pytest suite
 ├── docs/                   Documentation and images
 ├── Dockerfile.api          Combined frontend + backend image

@@ -4,6 +4,10 @@
 
 为了确保 SpatialBridge 项目的代码质量、算法精度、跨平台兼容性与长期可维护性，所有参与项目开发的贡献者与维护者均需遵守本规范。
 
+前端统一使用 Bun 1.4.4 安装依赖、运行测试和构建，版本与 `frontend/package.json`、CI 及 Docker 构建阶段保持一致。依赖锁文件为 `frontend/bun.lock`；普通安装使用 `bun install --cwd frontend --frozen-lockfile`。增删依赖时从 `frontend` 目录执行 `bun add` / `bun remove`，同时提交 `package.json` 和 `bun.lock`。
+
+`build` 和 `dev` 脚本显式运行 OpenSeadragon 图片资源复制步骤，再通过 Bun 执行工具；不要依赖 npm 的 `prebuild` / `predev` 自动钩子。
+
 ---
 
 ## 1. 架构设计与工程原则
@@ -14,7 +18,7 @@
   - 算法模块必须接受标准 Python / NumPy / Path 类型输入，返回纯数据字典或数据类，确保可以独立在 CLI（`spatialbridge register`）或单元测试中无头调用。
 - **前端解耦**：
   - 核心流转与算法逻辑（如 `flow.ts`、`hash.ts`、`compress.ts`、`png-core.ts`、`sbd-package.ts`）**严禁**直接绑定 React Hook、Component 或浏览器 DOM API。
-  - 纯逻辑模块需保持无状态或状态完全透明，使其可以在 Node.js 原生环境下通过 `node:test` 进行极速单元测试。
+  - 纯逻辑模块需保持无状态或状态完全透明，使其可以在 Bun 环境下运行单元测试。
 
 ### 1.2 内存防护与只读安全原则
 - **数据源只读保证**：
@@ -86,16 +90,16 @@ SPATIALBRIDGE_TEST_SBD='/absolute/path/OD2-OD0.005-2608252148.sbd' \
 
 ### 3.2 门禁 2：前端纯逻辑与单元测试
 ```bash
-npm --prefix frontend test
+bun run --cwd frontend test
 ```
 - **测试要求**：
-  - 基于 Node.js 原生测试运行器（`node --experimental-strip-types --test`），以当前输出为准，不固定测试数量。
+  - 使用 Bun 测试运行器（`bun test`），复用其兼容的 `node:test` 与 `node:assert` API；以当前输出为准，不固定测试数量。
   - 覆盖上传流转、自适应压缩、SHA-256 回退、PNG 扫描行无损验证、历史 SBD 包、指针手势、网格详情与国际化等纯逻辑。
   - 纯逻辑测试不能代替浏览器验收。修改选点/光谱交互时，检查点 ID 一致性、快速切点取消请求、分页/排序、CSV、缺少完整源和更换失败后的状态。
 
 ### 3.3 门禁 3：前端类型检查与生产打包
 ```bash
-npm --prefix frontend run build
+bun run --cwd frontend build
 ```
 - **测试要求**：
   - 执行 `tsc -p tsconfig.json --noEmit` 进行全量类型检查，零警告、零报错。

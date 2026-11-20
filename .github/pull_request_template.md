@@ -5,6 +5,6 @@
 ## 验证
 
 - [ ] `uv run pytest -q`
-- [ ] `cd frontend && npm test`
-- [ ] `cd frontend && npm run build`
+- [ ] `bun run --cwd frontend test`
+- [ ] `bun run --cwd frontend build`
 - [ ] 涉及界面的改动已附截图

@@ -34,7 +34,7 @@ FastAPI 在同一 HTTP 端口提供前端生产静态页面、`/api` REST 接口
 
 #### 1. 基础运行时
 - **Python**: 3.11 或更高版本，推荐安装 [uv](https://docs.astral.sh/uv/) 作为包管理工具。
-- **Node.js**: 22+ 及 npm。
+- **Bun**: [Bun](https://bun.sh/) 1.4.4，与 CI 和 Docker 构建版本一致，无需单独安装 Node.js。
 
 #### 2. 系统科学计算与 OCR 依赖（可选但推荐）
 - **macOS (Homebrew)**：
@@ -54,7 +54,7 @@ FastAPI 在同一 HTTP 端口提供前端生产静态页面、`/api` REST 接口
 uv sync --extra tiles --extra dev
 
 # 2. 安装前端依赖
-npm --prefix frontend install
+bun install --cwd frontend --frozen-lockfile
 ```
 
 > [!NOTE]
@@ -63,7 +63,7 @@ npm --prefix frontend install
 ### 2.3 启动一体化服务
 
 ```bash
-npm --prefix frontend run build
+bun run --cwd frontend build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
@@ -74,7 +74,7 @@ npm --prefix frontend run build
 保持一体化服务运行，在另一个终端从项目根目录重新构建前端：
 
 ```bash
-npm --prefix frontend run build
+bun run --cwd frontend build
 ```
 
 构建结束后刷新 `http://127.0.0.1:8000`，应用会读取更新后的静态文件，无需为前端改动重启 Python 服务。此方式需要手动构建和刷新，不提供 Vite 热更新。

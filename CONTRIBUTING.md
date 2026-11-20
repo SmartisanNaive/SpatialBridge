@@ -6,14 +6,14 @@
 
 ```bash
 uv sync --extra tiles --extra dev
-npm --prefix frontend install
-npm --prefix frontend run build
+bun install --cwd frontend --frozen-lockfile
+bun run --cwd frontend build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --port 8000
 ```
 
 以上命令均从项目根目录执行。开发、日常使用和部署统一访问 `http://127.0.0.1:8000`，一个应用进程提供页面、API、瓦片和下载。`serve` 默认读取 `frontend/dist`，自定义构建目录可用 `--frontend-dir` 指定。
 
-修改前端后执行 `npm --prefix frontend run build`，然后刷新浏览器；修改后端 Python 代码后重启应用服务。完整流程见[部署文档](docs/deployment.md#24-开发时更新代码)。
+修改前端后执行 `bun run --cwd frontend build`，然后刷新浏览器；修改后端 Python 代码后重启应用服务。完整流程见[部署文档](docs/deployment.md#24-开发时更新代码)。
 
 ## 测试
 
@@ -23,8 +23,8 @@ npm --prefix frontend run build
 uv run pytest -q          # 后端测试
 
 cd frontend
-npm test                  # 前端单元测试
-npm run build             # TypeScript 类型检查 + Vite 生产构建
+bun run test                  # 前端单元测试
+bun run build             # TypeScript 类型检查 + Vite 生产构建
 ```
 
 生产构建只做类型检查和 Vite 打包，不会在源码目录生成 TypeScript/Vite 编译文件。
