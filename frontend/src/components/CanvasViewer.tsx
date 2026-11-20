@@ -37,7 +37,6 @@ export function CanvasViewer({
   onViewport,
   onImageScale,
   initialViewport,
-  restoreViewport,
   manualPoints,
   annotationMode,
   onAnnotationPlace,
@@ -70,7 +69,6 @@ export function CanvasViewer({
   onViewport: (viewport: Viewport) => void;
   onImageScale?: (pixelsPerImagePixel: number) => void;
   initialViewport?: Viewport;
-  restoreViewport?: Viewport | null;
   manualPoints?: ManualPoint[];
   annotationMode?: boolean;
   onAnnotationPlace?: (point: {x: number; y: number}) => void;
@@ -120,11 +118,7 @@ export function CanvasViewer({
   const annotationOverlays = useRef(new Map<string, HTMLElement>());
   const annotationOverlayReady = useRef(false);
   const annotationSync = useRef<(() => void) | null>(null);
-  // Keep the first viewport and the durable restore checkpoint separate. A
-  // session view should win when the project opens, while the restore action
-  // must continue to target the last explicit server save.
   const initialViewportRef = useRef(initialViewport);
-  const restoreViewportRef = useRef(restoreViewport);
   const pitOverlaySync = useRef<(() => void) | null>(null);
   const outerFrameCache = useRef<{source: GridPoint[]; points: FramePoint[]} | null>(null);
   const gridSpatialIndex = useRef<GridSpatialIndex | null>(null);
@@ -184,10 +178,9 @@ export function CanvasViewer({
     selectedSpotRef.current = selectedSpot;
     viewerSettingsRef.current = {showGrid, showPits, overlayOpacity, showHeatmap, heatmapOpacity, heatmapColors};
     initialViewportRef.current = initialViewport;
-    restoreViewportRef.current = restoreViewport;
     annotationSync.current?.();
     pitOverlaySync.current?.();
-  }, [annotationMode, gridPoints, initialViewport, manualPoints, onAnnotationPlace, onAnnotationSelect, onImageScale, onSpotSelect, onViewport, restoreViewport, selectedAnnotationId, selectedSpot, showGrid, showPits, overlayOpacity, showHeatmap, heatmapOpacity, heatmapColors]);
+  }, [annotationMode, gridPoints, initialViewport, manualPoints, onAnnotationPlace, onAnnotationSelect, onImageScale, onSpotSelect, onViewport, selectedAnnotationId, selectedSpot, showGrid, showPits, overlayOpacity, showHeatmap, heatmapOpacity, heatmapColors]);
 
   useEffect(() => {
     const gesture = pointerGestureRef.current;
@@ -235,12 +228,6 @@ export function CanvasViewer({
     };
     const restoreInitial = (instance: OSDViewer, immediate = true) =>
       applyViewport(instance, initialViewportRef.current, immediate);
-    const restoreSaved = (instance: OSDViewer, immediate = true) => {
-      const saved = restoreViewportRef.current;
-      if (!saved || typeof saved.x !== 'number' || typeof saved.y !== 'number' || typeof saved.zoom !== 'number') return;
-      applyViewport(instance, saved, immediate);
-      updateImageScale();
-    };
     const makeViewer = (target: HTMLDivElement, showNavigator: boolean) => OpenSeadragon({
       element: target,
       showNavigator,
@@ -947,7 +934,6 @@ export function CanvasViewer({
       instance.viewport.goHome(false);
       compareInstance?.viewport.goHome(false);
     };
-    const restoreSavedEvent = () => restoreSaved(instance, false);
     const locate = () => {
       const selected = selectedSpotRef.current;
       if (selected && Number.isFinite(selected.pre_x) && Number.isFinite(selected.pre_y)) {
@@ -973,7 +959,6 @@ export function CanvasViewer({
     };
     window.addEventListener('spatialbridge-home', home);
     window.addEventListener('spatialbridge-fit', home);
-    window.addEventListener('spatialbridge-restore', restoreSavedEvent);
     window.addEventListener('spatialbridge-locate', locate);
     window.addEventListener('spatialbridge-zoom-in', zoomIn);
     window.addEventListener('spatialbridge-zoom-out', zoomOut);
@@ -981,7 +966,6 @@ export function CanvasViewer({
     return () => {
       window.removeEventListener('spatialbridge-home', home);
       window.removeEventListener('spatialbridge-fit', home);
-      window.removeEventListener('spatialbridge-restore', restoreSavedEvent);
       window.removeEventListener('spatialbridge-locate', locate);
       window.removeEventListener('spatialbridge-zoom-in', zoomIn);
       window.removeEventListener('spatialbridge-zoom-out', zoomOut);

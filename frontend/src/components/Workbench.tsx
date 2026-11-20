@@ -12,7 +12,6 @@ import {
   Slider,
   Switch,
   Tooltip,
-  Tag,
   Typography,
   message,
 } from 'antd';
@@ -26,11 +25,9 @@ import {
   FileSearchOutlined,
   FolderOpenOutlined,
   HeatMapOutlined,
-  HomeOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MoreOutlined,
-  SaveOutlined,
   SettingOutlined,
   SlidersOutlined,
   SwapOutlined,
@@ -38,7 +35,7 @@ import {
   ZoomOutOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import {hasViewport, projectName, selectInitialViewport} from '../flow';
+import {projectName, selectInitialViewport} from '../flow';
 import {AppHeader} from './AppHeader';
 import GlassSurface from './GlassSurface';
 import './Workbench.css';
@@ -60,7 +57,6 @@ import {apiUrl, apiFetch, errorText} from '../api';
 import {
   heatmapOrientation,
   spotNumber,
-  sanitizeManualPoints,
   manualPointsFromView,
   methodLabel,
   limitationLabel,
@@ -103,7 +99,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const [pixelsPerImagePixel, setPixelsPerImagePixel] = useState(0);
   const [viewerInitial, setViewerInitial] = useState<Viewport>();
   const [viewLoaded, setViewLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [gridPoints, setGridPoints] = useState<GridPoint[]>([]);
   const [gridSampled, setGridSampled] = useState(false);
   const [autoPitTotal, setAutoPitTotal] = useState(0);
@@ -133,11 +128,8 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const [lensSize, setLensSize] = useState(220);
   const [lensOverlap, setLensOverlap] = useState(90);
   const [lensFixed, setLensFixed] = useState(false);
-  const [saveConfirmed, setSaveConfirmed] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const viewportRef = useRef<Viewport>({});
-  const savedViewportRef = useRef<Viewport | null>(null);
-  const savedSettingsRef = useRef<Partial<WorkspaceSettings>>({});
   const sessionHydratedRef = useRef(false);
   const sessionPersistRef = useRef<(() => void) | null>(null);
   const spotRequestRef = useRef(0);
@@ -157,8 +149,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       const action = key === '+' || key === '=' ? 'spatialbridge-zoom-in'
         : key === '-' || key === '_' ? 'spatialbridge-zoom-out'
           : key === 'h' ? 'spatialbridge-fit'
-            : key === 'l' ? 'spatialbridge-locate'
-              : key === 'r' ? 'spatialbridge-restore' : null;
+            : key === 'l' ? 'spatialbridge-locate' : null;
       if (!action) return;
       event.preventDefault();
       window.dispatchEvent(new Event(action));
@@ -271,19 +262,17 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
     try { sessionRaw = window.sessionStorage.getItem(sessionKey); } catch { sessionRaw = null; }
     let session: {viewport?: Viewport; settings?: Partial<WorkspaceSettings>} | null = null;
     try { session = sessionRaw ? JSON.parse(sessionRaw) : null; } catch { session = null; }
+    // Continue the current tab's session without reusing an explicit saved view.
+    // Read legacy records only to preserve existing manual annotations.
     apiFetch<SavedViewResponse>(`/projects/${project.id}/view`)
       .then((saved) => {
         if (!active) return;
-        const next = selectInitialViewport(session, saved) as Viewport;
-        const settings = {...(saved.settings ?? {}), ...(session?.settings ?? {})};
+        const next = selectInitialViewport(session) as Viewport;
+        const settings = session?.settings ?? {};
         const nextLayer: ViewLayer = settings.layer === 'after' || settings.layer === 'pre'
           ? settings.layer
           : next.layer === 'after' ? 'after' : 'pre';
-        const durableManualPoints = manualPointsFromView(saved);
-        const durableViewport = saved.viewport ? {...saved.viewport, manualPoints: durableManualPoints} : null;
-        savedViewportRef.current = durableViewport;
-        savedSettingsRef.current = saved.settings ?? {};
-        setManualPoints(durableManualPoints);
+        setManualPoints(manualPointsFromView(saved));
         viewportRef.current = next;
         setViewport(next);
         setViewerInitial({...next, layer: nextLayer});
@@ -304,12 +293,10 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       })
       .catch(() => {
         if (!active) return;
-        savedViewportRef.current = null;
-        savedSettingsRef.current = {};
         setManualPoints([]);
         // If the service is temporarily unavailable, keep the tab-local
         // session usable instead of replacing it with a blank full view.
-        const next = selectInitialViewport(session, null) as Viewport;
+        const next = selectInitialViewport(session) as Viewport;
         const settings = session?.settings ?? {};
         const nextLayer: ViewLayer = settings.layer === 'after' || settings.layer === 'pre'
           ? settings.layer
@@ -331,7 +318,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         if (typeof settings.reducedMotion === 'boolean') setReducedMotion(settings.reducedMotion);
         sessionHydratedRef.current = true;
         setSelectedSpot(null);
-        messageApi.warning(next.x != null ? t.workbench.restoredSession : t.workbench.restoredOverview);
       })
       .finally(() => { if (active) setViewLoaded(true); });
     return () => { active = false; sessionHydratedRef.current = false; };
@@ -375,7 +361,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       try {
         window.sessionStorage.setItem(sessionKey, JSON.stringify({version: 2, viewport: viewportRef.current, settings}));
       } catch {
-        // Session storage is optional; the server saved view remains available.
+        // Session storage is optional; a new tab can start at the overview.
       }
     };
     sessionPersistRef.current = persist;
@@ -394,35 +380,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
 
   if (!report || !preSource || !afterSource) return <>{holder}<div className="canvas-empty"><TranslatedText text={t.workbench.noRegData} /></div></>;
 
-  const hasSavedView = hasViewport(savedViewportRef.current);
-  const restoreSavedView = () => {
-    const saved = savedViewportRef.current;
-    if (!saved) return;
-    const settings = savedSettingsRef.current;
-    const nextLayer: ViewLayer = settings.layer === 'after' || settings.layer === 'pre'
-      ? settings.layer
-      : saved.layer === 'after' ? 'after' : 'pre';
-    setViewport({...saved, layer: nextLayer});
-    viewportRef.current = {...saved, layer: nextLayer};
-    setLayer(nextLayer);
-    setManualPoints(sanitizeManualPoints(saved.manualPoints));
-    if (settings.mode === 'single' || settings.mode === 'compare' || settings.mode === 'lens') setMode(settings.mode);
-    if (typeof settings.swapLayers === 'boolean') setSwapLayers(settings.swapLayers);
-    if (typeof settings.comparePosition === 'number') setComparePosition(settings.comparePosition);
-    if (typeof settings.lensSize === 'number') setLensSize(settings.lensSize);
-    if (typeof settings.lensOverlap === 'number') setLensOverlap(settings.lensOverlap);
-    if (typeof settings.lensFixed === 'boolean') setLensFixed(settings.lensFixed);
-    if (typeof settings.showGrid === 'boolean') setShowGrid(settings.showGrid);
-    if (typeof settings.showPits === 'boolean') setShowPits(settings.showPits);
-    if (typeof settings.overlayOpacity === 'number') setOverlayOpacity(settings.overlayOpacity);
-    if (typeof settings.sidebarOpen === 'boolean') setSidebarOpen(settings.sidebarOpen);
-    if (typeof settings.reducedMotion === 'boolean') setReducedMotion(settings.reducedMotion);
-    setViewerInitial({...saved, layer: nextLayer});
-    // The viewer already has the durable checkpoint in its ref. Dispatch
-    // synchronously so a route change cannot deliver a generic event to the
-    // next project's canvas.
-    window.dispatchEvent(new Event('spatialbridge-restore'));
-  };
   const activeSource = currentLayer === 'after' ? afterSource : preSource;
   const activeRegistration = report.registrations.find((item) => item.source_key === currentLayer) ?? report.registrations[0];
   if (!activeRegistration) return <>{holder}<div className="canvas-empty"><TranslatedText text={t.workbench.noAvailableRegData} /></div></>;
@@ -453,9 +410,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   };
   const toggleComparisonLayers = () => {
     const next = !swapLayers;
-    // Role exchange is rendered by the two persistent image layers. Keep the
-    // single-mode selection and restore checkpoint untouched while the
-    // compare/lens roles change, so swapping never nudges or rebuilds the view.
+    // The two persistent image layers exchange roles without nudging the view.
     setSwapLayers(next);
   };
   const handleSpotSelect = async (point: {x: number; y: number; layer: string}) => {
@@ -486,41 +441,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       messageApi.error(t.workbench.failedReadSpot(errorText(error, language)));
     } finally {
       if (requestId === spotRequestRef.current) setSpotLoading(false);
-    }
-  };
-  const save = async () => {
-    setSaving(true);
-    try {
-      const settings: WorkspaceSettings = {
-        version: 2,
-        layer: currentLayer,
-        mode,
-        swapLayers,
-        comparePosition,
-        lensSize,
-        lensOverlap,
-        lensFixed,
-        showGrid,
-        showPits,
-        overlayOpacity,
-        sidebarOpen,
-        reducedMotion,
-      };
-      const savedViewport = {...viewport, layer: currentLayer, manualPoints};
-      await apiFetch(`/projects/${project.id}/view`, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({version: 2, viewport: savedViewport, settings}),
-      });
-      savedViewportRef.current = savedViewport;
-      savedSettingsRef.current = settings;
-      setViewerInitial(savedViewport);
-      setSaveConfirmed(true);
-      window.setTimeout(() => setSaveConfirmed(false), 1800);
-    } catch (error) {
-      messageApi.error(t.workbench.failedSave(errorText(error, language)));
-    } finally {
-      setSaving(false);
     }
   };
   const footprintWorld = pitDetection?.spot_size_world?.[0];
@@ -647,7 +567,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
             <Tooltip title={<TranslatedText text={maldiAvailable ? t.workbench.exportCsvTooltip : t.workbench.exportCsvNoDataTooltip} />}>
               <Button type="text" icon={<DownloadOutlined />} disabled={!maldiAvailable} href={maldiAvailable ? `${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}` : undefined} target="_blank"><TranslatedText text={t.workbench.exportCsvBtn} /></Button>
             </Tooltip>
-            <Button className={saveConfirmed ? 'save-confirmed' : ''} type="primary" icon={saveConfirmed ? <CheckCircleFilled /> : <SaveOutlined />} loading={saving} onClick={save}><TranslatedText text={saveConfirmed ? t.workbench.savedBtn : t.workbench.saveViewBtn} /></Button>
           </>
         }
         mobileActions={
@@ -786,7 +705,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                 onViewport={updateViewport}
                 onImageScale={setPixelsPerImagePixel}
                 initialViewport={viewerInitial}
-                restoreViewport={savedViewportRef.current}
                 manualPoints={manualPoints}
                 onSpotSelect={handleSpotSelect}
                 gridPoints={gridPoints}
@@ -832,7 +750,6 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
                   <ToolButton icon={<ZoomOutOutlined />} label={t.workbench.zoomOut} onClick={() => dispatchCanvasEvent('spatialbridge-zoom-out')} shortcut="−" />
                   <ToolButton icon={<CompressOutlined />} label={t.workbench.fit} onClick={() => dispatchCanvasEvent('spatialbridge-fit')} shortcut="H" />
                   <ToolButton icon={<AimOutlined />} label={selectedSpot ? t.workbench.focusSpot : t.workbench.locateArea} onClick={() => dispatchCanvasEvent('spatialbridge-locate')} shortcut="L" />
-                  <ToolButton icon={<HomeOutlined />} label={t.workbench.restoreView} onClick={restoreSavedView} disabled={!hasSavedView} shortcut="R" />
                 </GlassSurface>
               </motion.div>
               {((showPits && maldiAvailable) || (showGrid && gridPoints.length > 0)) && <div className="canvas-legend">
@@ -879,7 +796,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
       >
         {spotLoading ? <motion.div className="drawer-loading" initial={{opacity: 0}} animate={{opacity: 1}} transition={{duration: reducedMotion ? 0 : .18}}><Spin /><span><TranslatedText text={t.workbench.loadingSbdData} /></span></motion.div> : selectedSpot && (
           <motion.div className="spot-inspector" initial={{opacity: 0, x: 12}} animate={{opacity: 1, x: 0}} transition={{duration: reducedMotion ? 0 : .2}}>
-            <div className="spot-hero"><span className="spot-id">SPOT #{selectedSpot.spot_id}</span><Tag color={selectedSpot.detected ? 'success' : 'default'}><TranslatedText text={selectedSpot.detected ? t.workbench.spotDetected : t.workbench.spotCandidate} /></Tag><strong>{spotNumber(selectedSpot.value, 3)}</strong><small>{language === 'zh' ? 'SBD 归一化因子 · ' : 'SBD normalization factor · '}<TranslatedText text={selectedSpot.field_label ?? t.workbench.currentNormField} /></small></div>
+            <div className="spot-hero"><span className="spot-id">SPOT #{selectedSpot.spot_id}</span><strong>{spotNumber(selectedSpot.value, 3)}</strong></div>
             <SpotSpectrum key={`${project.id}:${selectedSpot.spot_id}`} projectId={project.id} spotId={selectedSpot.spot_id} onOpenData={() => setSpectraOpen(true)} />
             <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.heatmapColorSample} /></div><Typography.Paragraph type="secondary">{language === 'zh' ? 'PNG 热图的显示颜色，不是 SBD 原始离子强度。' : 'Display color from the PNG heatmap, not raw SBD ion intensity.'}</Typography.Paragraph>{selectedSpot.raster === (mapping?.primary_raster ?? 0) && heatmapColors.has(selectedSpot.spot_id) ? <div className="inspector-value"><span><TranslatedText text={heatmap?.label || heatmap?.filename || t.workbench.heatmapPng} /></span><strong><span aria-hidden="true" style={{display: 'inline-block', width: 14, height: 14, background: heatmapColors.get(selectedSpot.spot_id), border: '1px solid currentColor', marginRight: 8, verticalAlign: 'middle'}} />{heatmapColors.get(selectedSpot.spot_id)}</strong></div> : <Typography.Text type="secondary"><TranslatedText text={t.workbench.noColorSample} /></Typography.Text>}</div>
             <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.normValues} /></div>{selectedSpot.normalizations?.length ? selectedSpot.normalizations.map((value) => <div className={`inspector-value${value.key === (selectedSpot.field_key ?? selectedFieldKey) ? ' is-selected' : ''}`} key={value.key}><span>{value.label}</span><strong>{spotNumber(value.value, 3)}</strong></div>) : <Typography.Text type="secondary"><TranslatedText text={t.workbench.noNormValues} /></Typography.Text>}</div>

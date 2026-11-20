@@ -27,12 +27,12 @@ test('project summaries use the source directory and explicit status labels', ()
   assert.equal(projectStatusLabel('assembling', 'en'), 'Assembling');
 });
 
-test('session viewport wins over durable saved viewport, with a safe fallback', () => {
-  const saved = {viewport: {x: 1, y: 2, zoom: 3}};
+test('only a valid tab session supplies the initial viewport', () => {
   const session = {viewport: {x: 4, y: 5, zoom: 6}};
-  assert.deepEqual(selectInitialViewport(session, saved), session.viewport);
-  assert.deepEqual(selectInitialViewport(null, saved), saved.viewport);
-  assert.deepEqual(selectInitialViewport(null, null), {});
-  assert.equal(hasViewport(saved.viewport), true);
+  assert.deepEqual(selectInitialViewport(session), session.viewport);
+  assert.deepEqual(selectInitialViewport(null), {});
+  assert.deepEqual(selectInitialViewport({viewport: {x: 1, y: 2}}), {});
+  assert.deepEqual(selectInitialViewport({viewport: {x: 1, y: 2, zoom: NaN}}), {});
+  assert.equal(hasViewport(session.viewport), true);
   assert.equal(hasViewport({x: 1, y: 2}), false);
 });

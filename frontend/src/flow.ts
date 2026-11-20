@@ -43,12 +43,9 @@ export function formatCreatedAt(value?: string, lang: 'zh' | 'en' = 'zh') {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(lang === 'en' ? 'en-US' : 'zh-CN', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
 }
 
-export function selectInitialViewport(session: ViewLike | null | undefined, saved: ViewLike | null | undefined) {
-  const sessionViewport = isRecord(session?.viewport) ? session.viewport : undefined;
-  const savedViewport = isRecord(saved?.viewport) ? saved.viewport : undefined;
-  if (hasViewport(sessionViewport)) return sessionViewport;
-  if (hasViewport(savedViewport)) return savedViewport;
-  return sessionViewport ?? savedViewport ?? {};
+export function selectInitialViewport(session: ViewLike | null | undefined) {
+  const viewport = isRecord(session?.viewport) ? session.viewport : undefined;
+  return hasViewport(viewport) ? viewport! : {};
 }
 
 export function hasViewport(viewport: Record<string, unknown> | null | undefined) {
