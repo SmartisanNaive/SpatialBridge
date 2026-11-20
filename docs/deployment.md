@@ -85,7 +85,7 @@ bun run --cwd frontend build
 .venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-容器中的代码更新需要重新构建镜像并更新容器，见[服务升级](#61-服务升级与平滑重启)。
+容器部署更新时，发布镜像用户拉取新镜像并重建容器；仅本地源码构建用户需要重新编译镜像，见[服务升级与版本回退](#61-服务升级与版本回退)。
 
 ### 2.5 离线批处理 CLI
 
@@ -103,13 +103,27 @@ SpatialBridge 提供基于 [Dockerfile.api](../Dockerfile.api) 的前后端一�
 
 [CI 工作流](../.github/workflows/ci.yml) 在 `main` 更新后先运行前后端测试，再构建 Linux amd64/arm64 镜像并发布到 GHCR；拉取请求只构建 amd64 镜像验证，不发布。也可在 GitHub Actions 的 CI 页面选择 `main` 手动运行。发布使用仓库自带的 `GITHUB_TOKEN`，无需额外配置 Docker Hub 密钥。
 
-镜像标签包括随主分支更新的 `latest` 和对应源码的 `sha-<完整提交 SHA>`。首次发布后，在 GitHub Packages 中确认包的可见性为 **Public**，才能匿名拉取；私有包需要先以具备 `read:packages` 权限的账号凭据登录 GHCR。
+镜像已公开发布，可匿名拉取，无需执行 `docker login`。Docker 会按宿主机架构选择 amd64 或 arm64。镜像包含前端编译产物、Python 后端、libvips、OpenCV 运行依赖和 Tesseract；使用发布镜像的服务器无需安装第 2 节的 Python、uv、Bun 或系统计算依赖。
+
+| 名称 | 用途 |
+| --- | --- |
+| `ghcr.io/smartisannaive/spatialbridge:latest` | 最近一次成功发布的默认版本；构建失败不会更新此标签 |
+| `ghcr.io/smartisannaive/spatialbridge:sha-<完整提交 SHA>` | 指定源码提交的发布标签，用于固定版本和回退；只有发布成功的提交才有此标签 |
+| `spatialbridge:local` | 本机源码构建使用的镜像名称，不由 GHCR 发布 |
+| `spatialbridge` | Compose 项目名、服务名及容器名 |
+
+[GitHub Actions](https://github.com/SmartisanNaive/SpatialBridge/actions/workflows/ci.yml) 只负责测试、构建和发布，**不会连接服务器更新容器**。更新服务器需要执行拉取与启动命令，见[服务升级与版本回退](#61-服务升级与版本回退)。同一 Docker 主机上，当前固定容器名适用于一个实例。
 
 ### 3.1 方案一：Linux 服务器生产部署（Docker Compose）
 
+宿主机需要 [Docker Engine](https://docs.docker.com/engine/install/)、[Docker Compose V2](https://docs.docker.com/compose/install/) 和 Git；使用 `docker compose` 命令。可以先执行 `docker --version` 和 `docker compose version` 检查安装。以下首次部署步骤从服务器终端执行，后续 Compose 命令均在含 `compose.yaml` 和 `.env` 的部署目录中运行。
+
 #### 1. 准备配置与目录
 ```bash
-# 复制环境变量模板
+git clone https://github.com/SmartisanNaive/SpatialBridge.git
+cd SpatialBridge
+
+# 仅首次部署时复制模板；更新时保留已配置的 .env
 cp .env.example .env
 
 # 创建数据持久化目录，并将属主设为镜像内的运行用户 (UID 10001:10001)
@@ -132,20 +146,51 @@ SPATIALBRIDGE_PORT=8000
 SPATIALBRIDGE_DATA_DIR=/srv/spatialbridge/data
 ```
 
-#### 3. 启动容器
+下表对应仓库的 `.env.example`；修改宿主机数据目录后，应创建该目录并赋予 UID/GID `10001:10001` 读写权限。
+
+| 配置项 | 默认值 | 含义 |
+| --- | --- | --- |
+| `SPATIALBRIDGE_IMAGE` | `ghcr.io/smartisannaive/spatialbridge:latest` | 拉取的发布镜像，也可固定到已发布的 SHA 标签 |
+| `SPATIALBRIDGE_BIND_ADDRESS` | `0.0.0.0` | 发布到宿主机所有网络接口；仅本机或同机反向代理使用时设为 `127.0.0.1` |
+| `SPATIALBRIDGE_PORT` | `8000` | 宿主机访问端口，容器内仍监听 8000 |
+| `SPATIALBRIDGE_DATA_DIR` | `/srv/spatialbridge/data` | 宿主机持久化目录，挂载至容器 `/data` |
+
+#### 3. 启动容器与验收
 ```bash
-# 拉取 Actions 发布的完整应用镜像并后台启动
+# 检查配置，再拉取 Actions 发布的完整应用镜像并后台启动
+sudo docker compose config --quiet
 sudo docker compose pull
 sudo docker compose up -d --no-build
 
-# 查看运行状态与日志
+# 查看运行状态、近期日志和健康接口
 sudo docker compose ps
-sudo docker compose logs -f spatialbridge
+sudo docker compose logs --tail=100 spatialbridge
+curl -fsS http://127.0.0.1:8000/api/health
 ```
 
-浏览器访问 `http://<服务器IP>:8000` 即可开始使用。
+健康接口应返回 `{"status":"ok"}`。Compose 配置会周期性检查此接口，启动后稍等再查看 `ps` 中的健康状态。浏览器访问 `http://<服务器IP>:8000`，检查首页和项目列表是否正常；自定义端口或监听地址时，相应替换以上访问地址。
 
-#### 4. 可选：从源码构建
+前端、API、瓦片和 CSV 下载共用此端口。`/data` 保存数据库、完整上传文件、项目报告和缓存；停止或重建容器不会删除绑定挂载的宿主机数据。外部关联的 SBD 不包含在镜像或此目录内，需另外挂载，见[备份策略](#62-备份策略)。
+
+#### 4. 日常操作与故障排查
+
+```bash
+sudo docker compose logs --tail=100 -f spatialbridge  # 持续查看日志；Ctrl+C 仅退出日志跟踪
+sudo docker compose stop                           # 停止服务，保留容器和数据
+sudo docker compose start                          # 启动已存在的容器
+sudo docker compose down                           # 移除服务容器和网络，保留宿主机数据目录
+```
+
+| 现象 | 检查方法 |
+| --- | --- |
+| 拉取报 `manifest unknown` | 确认目标提交的 `Container image` 任务成功，且 SHA 标签是完整 40 位提交号；源码提交和发布完成有时间差 |
+| GHCR 拉取超时或拒绝访问 | 检查服务器到 `ghcr.io` 的网络及 Docker 守护进程代理配置；当前发布包支持匿名拉取 |
+| `/data` 写入报 `Permission denied` | 确认实际绑定目录与 `.env` 一致，并允许 UID/GID `10001:10001` 读写；不要只修改容器内目录 |
+| 提示端口已被占用 | 修改 `.env` 的 `SPATIALBRIDGE_PORT`，然后重新执行 `up -d --no-build` |
+| 容器正常但远端浏览器无法访问 | 检查绑定地址、宿主机防火墙或云安全组；`127.0.0.1` 仅允许本机访问 |
+| 容器退出或一直不健康 | 查看 `ps`、日志和健康接口；核对数据目录权限、磁盘剩余空间和可用内存 |
+
+#### 5. 可选：从源码构建
 
 需要验证未发布的本地代码时，将 `.env` 中的 `SPATIALBRIDGE_IMAGE` 改为 `spatialbridge:local`，再运行：
 
@@ -159,24 +204,26 @@ sudo docker compose up -d --build --pull never
 
 ### 3.2 方案二：macOS 容器化运行（Apple Container）
 
-macOS 26+ 内置了原生的 Apple `container` 运行时，可直接用于本地隔离运行与测试，并映射到 `18000` 端口以避免与本地开发端口冲突：
+在支持的 macOS 26+ 系统上安装并启动 Apple `container` 运行时后，可直接拉取发布的 ARM64 镜像。这里映射到 `18000` 端口，避免与本机 8000 服务冲突：
 
 ```bash
-# 1. 构建 ARM64 Linux 容器镜像
-container build -f Dockerfile.api -t spatialbridge:local --cpus 4 --memory 4G .
+# 1. 拉取发布镜像
+container image pull ghcr.io/smartisannaive/spatialbridge:latest
 
-# 2. 创建 16GB 独立持久化命名卷并授权
-container volume create -s 16G spatialbridge-data
+# 2. 首次部署：创建持久化命名卷并授权，容量按数据规模调整
+container volume create -s 100G spatialbridge-data
 container run --rm --user 0:0 --entrypoint /bin/chown \
-  -v spatialbridge-data:/data spatialbridge:local 10001:10001 /data
+  -v spatialbridge-data:/data ghcr.io/smartisannaive/spatialbridge:latest 10001:10001 /data
 
 # 3. 启动长期容器服务
 container run -d --name spatialbridge --cpus 4 --memory 6G \
-  -p 127.0.0.1:18000:8000 -v spatialbridge-data:/data spatialbridge:local
+  -p 127.0.0.1:18000:8000 -v spatialbridge-data:/data ghcr.io/smartisannaive/spatialbridge:latest
 
 # 4. 验证服务健康状态
 curl -fsS http://127.0.0.1:18000/api/health
 ```
+
+需要从源码构建时，在仓库根目录运行 `container build -f Dockerfile.api -t spatialbridge:local --cpus 4 --memory 4G .`，再将上述运行命令中的镜像名改为 `spatialbridge:local`。命名卷独立保存数据；更新发布镜像后，需要停止并移除旧服务容器，再使用同一卷重新创建服务，单独 `container start` 不会切换到新镜像。
 
 访问入口：`http://127.0.0.1:18000`。
 容器启停与维护命令：
@@ -252,23 +299,48 @@ server {
 
 ## 6. 运维管理、备份与灾难恢复
 
-### 6.1 服务升级与平滑重启
+### 6.1 服务升级与版本回退
+
+更新前按[备份策略](#62-备份策略)备份数据和 `.env`，并记录当前运行版本。发布镜像带有源码提交标签，可用以下命令查看：
 
 ```bash
-# 1. 拉取最新代码
-git pull origin main
+sudo docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' spatialbridge
+```
 
-# 2. 确认目标提交的 CI 已发布镜像，再拉取并更新容器
+等待目标提交的 GitHub Actions `Container image` 任务发布成功，再在部署目录执行：
+
+```bash
+# 1. 更新部署配置；保留服务器已有的 .env
+git pull --ff-only origin main
+
+# 2. 按 .env 指定的 latest 或 SHA 标签拉取镜像并更新容器
+sudo docker compose config --quiet
 sudo docker compose pull
 sudo docker compose up -d --no-build
 
 # 3. 验证服务状态
+sudo docker compose ps
+sudo docker compose logs --tail=100 spatialbridge
 curl -fsS http://127.0.0.1:8000/api/health
 ```
 
+`pull` 只下载镜像，`up -d --no-build` 才会在镜像变化后重新创建容器。更新可能短暂中断服务，应在上传和图像处理任务结束后执行。`restart` 或 `start` 不会把现有容器切换到刚拉取的新镜像。更新时无需删除数据目录。
+
+固定版本或回退时，编辑 `.env`，将以下占位符替换为先前已成功发布的完整 40 位提交 SHA：
+
+```dotenv
+SPATIALBRIDGE_IMAGE=ghcr.io/smartisannaive/spatialbridge:sha-<先前版本的完整40位提交SHA>
+```
+
+然后再次执行 `sudo docker compose pull` 和 `sudo docker compose up -d --no-build`，并验证健康状态。标签需确实存在于 GHCR，不能只凭源码提交推断已经发布。
+
+此操作回退应用镜像，不会回退数据库或用户数据。若版本之间存在数据格式迁移，需核对对应版本说明，必要时使用更新前备份恢复；不要用旧镜像直接假定数据兼容。本地源码构建用户将 `.env` 保持为 `spatialbridge:local`，更新源码后按[源码构建](#5-可选从源码构建)的命令重新构建。
+
 ### 6.2 备份策略
 
-为确保 SQLite 数据库、完整上传来源、原始分片与项目缓存状态一致，备份前建议先暂停容器。目录导入或 `spectra-source.json` 关联的外部 SBD 不会被下面的数据目录备份自动包含，需单独备份，并在恢复后保持原路径或重新关联。容器关联路径必须是容器内可访问的路径，宿主机文件需另设只读挂载。
+为确保 SQLite 数据库、完整上传来源、原始分片与项目缓存状态一致，备份前建议先停止容器。另行保留部署目录中的 `.env`、Compose 配置和当前运行版本，方便恢复相同的数据路径和镜像。下面的归档示例使用默认 `/srv/spatialbridge/data`，自定义 `SPATIALBRIDGE_DATA_DIR` 时需调整归档目录，并先确认 `/srv/backups` 存在且可写。
+
+目录导入或 `spectra-source.json` 关联的外部 SBD 不会被数据目录备份自动包含，需单独备份，并在恢复后保持原路径或重新关联。容器关联路径必须是容器内可访问的路径，宿主机文件需另设只读挂载。
 
 ```text
 # 可选 Compose 挂载示例，放在服务的 volumes 中
@@ -293,7 +365,7 @@ sudo docker compose start
 
 ### 6.3 灾难恢复
 
-在全新服务器或故障恢复时，将备份包解压至数据目录并校正权限：
+在全新服务器或故障恢复时，先准备 Docker、部署仓库和备份的 `.env`，确认目标镜像与数据目录。以下示例使用默认路径，恢复到新建空目录，已有数据应先另行保留，再将备份包解压并校正权限：
 
 ```bash
 # 1. 停止当前服务
@@ -306,8 +378,10 @@ sudo tar --numeric-owner -xzf /path/to/spatialbridge-backup.tar.gz -C /srv/spati
 sudo chown -R 10001:10001 /srv/spatialbridge/data
 sudo chmod -R 770 /srv/spatialbridge/data
 
-# 4. 重新启动服务
-sudo docker compose up -d
+# 4. 拉取 .env 中指定的已发布版本并启动
+sudo docker compose pull
+sudo docker compose up -d --no-build
+curl -fsS http://127.0.0.1:8000/api/health
 ```
 
 ### 6.4 数据目录内部结构说明
@@ -333,6 +407,17 @@ data/
 ---
 
 ## 7. 容器验证记录与验收清单
+
+### GitHub Actions 与 GHCR 发布验证
+
+首次发布对应提交 `ee27ef1da28196f0c70c0474b0ff0a1b4fc7aa5e`，见[成功的流水线](https://github.com/SmartisanNaive/SpatialBridge/actions/runs/44766639658)：
+
+- 前后端测试及 `Container image` 任务均成功。
+- GHCR 镜像清单包含 Linux amd64 和 arm64，支持匿名访问。
+- 当次发布的 `latest` 与 `sha-ee27ef1da28196f0c70c0474b0ff0a1b4fc7aa5e` 指向同一个镜像清单；后续 `latest` 会随成功发布更新。
+- Bun 1.4.4 的 Linux 前端构建及本地完整 ARM64 应用镜像构建成功；完整镜像中已确认前端存在，`cv2`、`h5py`、NumPy 和 SBD 读取器可以导入。
+
+上述记录不替代目标服务器上的完整业务验收，真实文件上传、持久化、光谱读取与浏览器交互仍按本节清单核对。
 
 ### 本地容器验证记录（已通过）
 

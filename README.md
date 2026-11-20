@@ -54,6 +54,8 @@ SpatialBridge 将显微图中的激光采样位置与 SCiLS SBD 点位对应起�
 
 ### 环境要求
 
+直接使用发布镜像时，只需 Docker Engine 和 Docker Compose V2，见[容器部署](#容器部署推荐用于服务器)。以下依赖用于本地源码运行：
+
 - Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)
 - [Bun](https://bun.sh/) 1.4.4（与 CI、Docker 构建保持一致，无需单独安装 Node.js）
 - 可选：[libvips](https://www.libvips.org/)（配合 `--extra tiles` 加速大图处理）、[Tesseract](https://github.com/tesseract-ocr/tesseract)（读取热图上的 m/z 标签）
@@ -93,18 +95,36 @@ bun run --cwd frontend build
 
 数据库、上传分片、报告和缓存写在 `--data-dir` 下。目录导入和本地关联仍依赖外部来源路径；迁移时需同时保留或重新关联来源文件。
 
-### 服务器部署
+### 容器部署（推荐用于服务器）
+
+镜像 **`ghcr.io/smartisannaive/spatialbridge:latest`** 已公开发布，可匿名拉取，支持 Linux amd64/arm64，Docker 会自动选择匹配的架构。镜像包含前端、Python 后端及所需系统依赖，服务器无需安装 Python、Bun 或自行编译。
+
+安装 Docker Engine 和 Compose V2 后，首次部署执行：
 
 ```bash
+git clone https://github.com/SmartisanNaive/SpatialBridge.git
+cd SpatialBridge
 cp .env.example .env
 sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
+# 按需编辑 .env 中的镜像、监听地址、端口和数据目录
+sudo docker compose pull
+sudo docker compose up -d --no-build
+sudo docker compose ps
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+浏览器打开 `http://服务器IP:8000`。Compose 项目和容器均名为 `spatialbridge`，同一端口提供页面、API、瓦片和下载。运行数据保存在宿主机 `/srv/spatialbridge/data`，挂载到容器 `/data`；自定义目录时也需允许 UID/GID `10001:10001` 读写。数据目录应预留完整 SBD、上传合并临时空间与图像缓存的容量。
+
+GitHub Actions 在 `main` 更新且前后端测试通过后自动发布镜像，**不会自动更新已运行的服务器**。等待 [CI](https://github.com/SmartisanNaive/SpatialBridge/actions/workflows/ci.yml) 的 `Container image` 成功后，在部署目录执行：
+
+```bash
 sudo docker compose pull
 sudo docker compose up -d --no-build
 ```
 
-GitHub Actions 在 `main` 更新且前后端测试通过后，自动构建并发布 `ghcr.io/smartisannaive/spatialbridge:latest`，支持 Linux amd64/arm64。每次发布也有 `sha-<完整提交 SHA>` 标签，可通过 `.env` 的 `SPATIALBRIDGE_IMAGE` 固定版本。容器名为 `spatialbridge`，服务端口仍为 8000。首次发布后需在 GitHub Packages 确认包为 Public，匿名拉取才可用。
+默认 `latest` 跟随最新成功发布；需要固定版本或回退时，将 `.env` 中的 `SPATIALBRIDGE_IMAGE` 改为已发布的 `ghcr.io/smartisannaive/spatialbridge:sha-<完整提交 SHA>`，再执行上述命令。查看日志可用 `sudo docker compose logs --tail=100 -f spatialbridge`。
 
-配置项、本地源码构建、完整 SBD 容量规划、更新和备份恢复见[部署文档](docs/deployment.md)。
+完整配置、健康检查、故障排查、版本回退、本地源码构建及备份恢复见[部署文档](docs/deployment.md#3-容器部署指南)。
 
 ## 文档
 

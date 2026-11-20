@@ -54,6 +54,8 @@ When a full SBD is available, the file-path editor stays hidden. Legacy compact-
 
 ### Requirements
 
+Published-image deployments only need Docker Engine and Docker Compose V2; see [container deployment](#container-deployment-recommended-for-servers). The following dependencies are for running from source:
+
 - Python 3.11+ and [uv](https://docs.astral.sh/uv/)
 - [Bun](https://bun.sh/) 1.4.4 (matching CI and Docker builds; no separate Node.js installation needed)
 - Optional: [libvips](https://www.libvips.org/) (faster large-image processing with `--extra tiles`) and [Tesseract](https://github.com/tesseract-ocr/tesseract) (reads m/z labels on heat maps)
@@ -93,18 +95,36 @@ bun run --cwd frontend build
 
 The database, upload chunks, reports and caches live under `--data-dir`. Directory imports and locally linked SBDs still depend on external source paths; preserve or relink those files when migrating.
 
-### Server deployment
+### Container deployment (recommended for servers)
+
+The published image **`ghcr.io/smartisannaive/spatialbridge:latest`** supports anonymous pulls and Linux amd64/arm64; Docker selects the matching architecture automatically. It includes the frontend, Python backend and required system dependencies. Servers do not need Python, Bun or a source build.
+
+After installing Docker Engine and Compose V2, deploy for the first time with:
 
 ```bash
+git clone https://github.com/SmartisanNaive/SpatialBridge.git
+cd SpatialBridge
 cp .env.example .env
 sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
+# Adjust the image, bind address, port and data directory in .env as needed
+sudo docker compose pull
+sudo docker compose up -d --no-build
+sudo docker compose ps
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+Open `http://SERVER_IP:8000`. The Compose project and container are both named `spatialbridge`; one port serves the frontend, API, tiles and downloads. Runtime data lives at `/srv/spatialbridge/data` on the host, mounted at `/data`. Custom data directories must also allow UID/GID `10001:10001` to read and write. Allow space for full SBD files, temporary upload assembly and image caches.
+
+After frontend and backend tests pass on updates to `main`, GitHub Actions publishes an image. **It does not automatically update running servers.** Wait for `Container image` to succeed in [CI](https://github.com/SmartisanNaive/SpatialBridge/actions/workflows/ci.yml), then run from the deployment directory:
+
+```bash
 sudo docker compose pull
 sudo docker compose up -d --no-build
 ```
 
-After frontend and backend tests pass on updates to `main`, GitHub Actions builds and publishes `ghcr.io/smartisannaive/spatialbridge:latest` for Linux amd64/arm64. Each publication also has a `sha-<full commit SHA>` tag; set `SPATIALBRIDGE_IMAGE` in `.env` to pin a version. The container is named `spatialbridge` and serves port 8000. After the first publication, confirm that the package is Public in GitHub Packages to allow anonymous pulls.
+The default `latest` tag tracks the latest successful publication. To pin or roll back a version, set `SPATIALBRIDGE_IMAGE` in `.env` to a published `ghcr.io/smartisannaive/spatialbridge:sha-<full commit SHA>` tag and run the same commands. View logs with `sudo docker compose logs --tail=100 -f spatialbridge`.
 
-See the [deployment guide](docs/deployment.md) (Chinese) for configuration, local source builds, full-SBD storage planning, updates and backup/restore.
+See the [deployment guide](docs/deployment.md#3-容器部署指南) (Chinese) for configuration, health checks, troubleshooting, rollback, local source builds and backup/restore.
 
 ## Documentation
 
