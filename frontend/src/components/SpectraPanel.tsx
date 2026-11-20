@@ -63,6 +63,7 @@ export function SpectraPanel({projectId}: {projectId: string}) {
   const base = `/projects/${encodeURIComponent(projectId)}/spectra`;
   const [sourceVersion, setSourceVersion] = useState(0);
   const [path, setPath] = useState('');
+  const [editingSource, setEditingSource] = useState(false);
   const [meanId, setMeanId] = useState<string>();
   const [spotId, setSpotId] = useState('');
   const [masses, setMasses] = useState('726.5025');
@@ -79,13 +80,15 @@ export function SpectraPanel({projectId}: {projectId: string}) {
   const ions = useQuery<Ions>(JSON.stringify([scope, masses, tolerance, unit, aggregation, normalization, region]));
   useEffect(() => { void summary.run(base); }, [base, summary.run]);
   useEffect(() => {
-    setPath(''); setMeanId(undefined); setSpotId(''); setNormalization(''); setRegion('');
+    setPath(''); setEditingSource(false); setMeanId(undefined); setSpotId(''); setNormalization(''); setRegion('');
   }, [projectId]);
   useEffect(() => {
     setMeanId(undefined); setNormalization(''); setRegion('');
   }, [sourceVersion]);
   const info = summary.data;
   const available = !!info?.available && !summary.loading && !attachment.loading;
+  const needsSource = info?.available === false || !!summary.error;
+  const showSourceEditor = needsSource || editingSource;
   const parsedMasses = masses.split(',').map(value => Number(value.trim()));
   const validTargets = masses.split(',').every(value => value.trim() !== '') && parsedMasses.length <= 32
     && parsedMasses.every(value => Number.isFinite(value) && value > 0) && tolerance.trim() !== '' && Number.isFinite(Number(tolerance)) && Number(tolerance) >= 0;
@@ -105,26 +108,39 @@ export function SpectraPanel({projectId}: {projectId: string}) {
   </>;
   return <div className="spectra-panel">
     <section>
-      <div className="spectra-heading"><Typography.Title level={4}>{text('光谱状态', 'Spectral data status')}</Typography.Title><Button loading={summary.loading} onClick={() => { setSourceVersion(v => v + 1); }}>{text('刷新', 'Refresh')}</Button></div>
+      <div className="spectra-heading"><Typography.Title level={4}>{text('光谱状态', 'Spectral data status')}</Typography.Title><Button loading={summary.loading} disabled={attachment.loading} onClick={() => { setSourceVersion(v => v + 1); }}>{text('刷新', 'Refresh')}</Button></div>
       {error(summary.error)}
+      {summary.loading && <Typography.Text role="status">{text('正在检查项目中的 SBD 文件…', 'Checking the project SBD file…')}</Typography.Text>}
       {info && <>
-        <Alert type={info.available ? 'success' : 'warning'} showIcon message={info.available ? text('光谱数据可读取', 'Spectral data available') : text('光谱不可用', 'Spectral data unavailable')} description={info.reason} />
-        <Descriptions column={1} size="small" items={[
+        <Alert type={info.available ? 'success' : 'warning'} showIcon message={info.available ? text('已自动读取项目的 SBD 文件', 'Using the project SBD file') : text('需要补充完整 SBD', 'Full SBD file needed')} description={info.reason} />
+        {info.available && <Descriptions column={1} size="small" items={[
           {key: 'file', label: text('文件', 'File'), children: info.filename ?? '—'},
           {key: 'spots', label: text('点数 / m/z 数', 'Spots / m/z bins'), children: `${info.spot_count ?? '—'} / ${info.mz_count ?? '—'}`},
           {key: 'range', label: text('m/z 范围', 'm/z range'), children: `${info.mz_min ?? '—'} – ${info.mz_max ?? '—'}`},
           {key: 'producer', label: text('生成程序 / 版本', 'Producer / version'), children: `${info.producer ?? '—'} / ${info.version ?? '—'}`},
           {key: 'spot', label: text('单点光谱', 'Spot spectra'), children: info.spot_spectra_available ? text('可用', 'Available') : text('不可用', 'Unavailable')},
-        ]} />
+        ]} />}
       </>}
-      <label htmlFor="spectra-source">{text('关联完整 SBD 的服务器本地路径', 'Attach full SBD by local server path')}</label>
-      <Input id="spectra-source" value={path} onChange={e => setPath(e.target.value)} placeholder="/absolute/path/data.sbd" />
-      <Typography.Text type="secondary">{text('填写服务器可访问的完整文件路径，不是浏览器所在设备的路径。已有精简文件不包含完整光谱。', 'Enter the full file path accessible to the server. A compact file does not contain full spectra.')}</Typography.Text>
-      <Button loading={attachment.loading} disabled={!path.trim()} onClick={async () => {
-        const result = await attachment.run(`${base}/source`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: path.trim()})});
-        if (result) setSourceVersion(v => v + 1);
-      }}>{text('关联文件', 'Attach file')}</Button>
-      {error(attachment.error)}
+      {info?.available && !showSourceEditor && <div>
+        <Button size="small" type="link" disabled={summary.loading} onClick={() => setEditingSource(true)}>{text('更换数据文件', 'Change data file')}</Button>
+      </div>}
+      {showSourceEditor && <>
+        <label htmlFor="spectra-source">{needsSource ? text('补充完整 SBD 文件', 'Provide the full SBD file') : text('更换 SBD 文件', 'Change SBD file')}</label>
+        <Input id="spectra-source" value={path} disabled={attachment.loading} onChange={e => setPath(e.target.value)} placeholder={text('完整 SBD 的本机绝对路径', 'Absolute path to the full SBD file')} />
+        <Typography.Text type="secondary">{text('填写运行 SpatialBridge 的电脑可访问的文件路径。文件验证通过后才会更新项目数据来源。', 'Enter a file path accessible to the computer running SpatialBridge. The data source changes only after the file passes validation.')}</Typography.Text>
+        <Space wrap>
+          <Button loading={attachment.loading} disabled={!path.trim() || summary.loading} onClick={async () => {
+            const result = await attachment.run(`${base}/source`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: path.trim()})});
+            if (result) {
+              setEditingSource(false);
+              setPath('');
+              setSourceVersion(v => v + 1);
+            }
+          }}>{needsSource ? text('使用此文件', 'Use this file') : text('验证并更换', 'Validate and change')}</Button>
+          {!needsSource && <Button disabled={attachment.loading} onClick={() => { setEditingSource(false); setPath(''); }}>{text('取消', 'Cancel')}</Button>}
+        </Space>
+        {error(attachment.error)}
+      </>}
     </section>
     <Alert type="info" showIcon message={text('数值解释', 'Interpreting values')} description={text('稀疏数据中缺失的值填为 0，不保证为物理零值。保存的归一化采用强度除以存储因子，属于实验性处理。', 'Missing sparse values are filled with 0; this does not guarantee a physical zero. Saved normalization divides intensity by the stored factor and is experimental.')} />
     <section>
