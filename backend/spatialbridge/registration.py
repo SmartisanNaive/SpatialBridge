@@ -194,10 +194,10 @@ def _attribute_text(attributes: Any, key: str) -> str | None:
 
 
 def inspect_maldi_data(path: Path | None) -> dict[str, Any]:
-    """Read only the small SBD index/normalization arrays used by the UI.
+    """Inspect geometry and normalizations without bulk-loading spectra.
 
-    The raw spectra blobs are intentionally not loaded. Manual annotations
-    remain user-entered and are stored separately from the read-only SBD.
+    The spectral workbench reads selected spectra/windows on demand through
+    SBDReader. Manual annotations remain separate from the read-only SBD.
     """
     if path is None:
         return {"available": False, "reason": "未找到 MALDI-数据/*.sbd"}
@@ -659,7 +659,7 @@ def build_project(source_dir: Path, project_dir: Path, progress: Callable[[str],
         limitations = ["当前没有建立 SBD→显微图坐标链，自动灼烧坑检测和自动取值不可用。",
                        "当前为区域级前后图像对齐，不承诺细胞尺度精度。",
                        "灼烧坑上的数值由用户人工录入，单独保存，不会改写原始 SBD。"]
-    limitations.append("导入时读取 SBD 坐标和 normalization 数值，不加载完整原始光谱。")
+    limitations.append("导入时读取 SBD 坐标和 normalization 数值；关联完整 SBD 后可在质谱面板按需读取单点光谱和质量窗口强度。")
     report = {"schema_version": 7, "common_coordinate_layer": "pre", "sources": [serialize(item) for item in source_objects],
               "registrations": [serialize(item) for item in registrations], "maldi_data": maldi_data,
               "spatial_mapping": spatial_mapping,

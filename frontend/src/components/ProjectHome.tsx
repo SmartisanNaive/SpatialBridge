@@ -17,8 +17,6 @@ import {projectName, projectStatusLabel} from '../flow';
 import {sha256Hex} from '../hash';
 import {compressionSupported, gzip, shouldCompress} from '../compress';
 import type {CompressionSample} from '../compress';
-import {extractSbd} from '../sbd';
-import type {SbdExtraction} from '../sbd';
 import {optimizePng} from '../png';
 import type {PngOptimization} from '../png';
 import type {Project, UploadRole, UploadSession} from '../types';
@@ -91,9 +89,7 @@ export function ProjectHome({
   const [session, setSession] = useState<UploadSession | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadCompleted, setUploadCompleted] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-  const [sbdExtraction, setSbdExtraction] = useState<{source: File; result: SbdExtraction} | null>(null);
-  const extractionRef = useRef<{source: File; result: SbdExtraction} | null>(null);
+  const [preparingFiles, setPreparingFiles] = useState(false);
   const imageCache = useRef(new WeakMap<File, PngOptimization>());
   const [imageOptimizations, setImageOptimizations] = useState<Map<File, PngOptimization>>(new Map());
   const [paused, setPaused] = useState(false);
@@ -305,7 +301,7 @@ export function ProjectHome({
     setSelected((current) => ({...current, [role]: current[role].filter((_, itemIndex) => itemIndex !== index)}));
   };
   const prepareFile = (role: UploadRole, file: File) => role === 'sbd'
-    ? (sbdExtraction?.source === file ? sbdExtraction.result.file : file)
+    ? file
     : (imageOptimizations.get(file)?.file ?? file);
   const preparedSelection = Object.fromEntries(uploadRoles.map((role) => [role, selected[role].map((file) => prepareFile(role, file))])) as Record<UploadRole, File[]>;
   const selectedImages = [...selected.pre, ...selected.after, ...selected.heatmap];
@@ -314,8 +310,7 @@ export function ProjectHome({
   const optimizedImageBytes = checkedImages.reduce((sum, file) => sum + imageOptimizations.get(file)!.file.size, 0);
   const allSelected = uploadRoles.flatMap((role) => preparedSelection[role].map((file) => ({role, file})));
   const selectedTotal = allSelected.reduce((sum, item) => sum + item.file.size, 0);
-  const legacySbdSession = !!session?.files.some((file) => file.role === 'sbd' && file.filename.toLowerCase().endsWith('.sbd'));
-  const canStart = selected.pre.length === 1 && selected.after.length === 1 && !uploading && !busy && !legacySbdSession;
+  const canStart = selected.pre.length === 1 && selected.after.length === 1 && !uploading && !busy;
 
   const fileStatus = (
     file: File,
@@ -326,7 +321,7 @@ export function ProjectHome({
     if (uploadError) return {status: 'failed', label: t.home.animInterrupted};
     if (paused) return {status: 'paused', label: t.home.animPaused};
     if (uploading) {
-      if (extracting) return {status: 'running', label: t.home.animExtracting};
+      if (preparingFiles) return {status: 'running', label: t.home.uploadStatusPreparing};
       return {
         status: 'running',
         label: percent != null && percent >= 100 ? t.home.animUploadDone : t.home.animUploading,
@@ -434,33 +429,7 @@ export function ProjectHome({
     setUploading(true);
     try {
       let uploadSelection = selected;
-      if (selected.sbd.length) {
-        const source = selected.sbd[0];
-        setExtracting(true);
-        setUploadStatus(t.home.uploadStatusParsingSbd);
-        abortRef.current = new AbortController();
-        const cached = extractionRef.current?.source === source ? extractionRef.current.result : null;
-        const result = cached ?? await extractSbd(source, {
-          signal: abortRef.current.signal,
-          onProgress: ({stage, completed, total}) => {
-            if (language === 'en') {
-              if (stage.includes('目录结构')) setUploadStatus('Parsing SBD directory structure…');
-              else if (stage.includes('提取 SBD 数据')) setUploadStatus(`Extracting SBD data (${completed + 1}/${total})…`);
-              else if (stage.includes('校验')) setUploadStatus('Verifying extracted data…');
-              else setUploadStatus(stage);
-            } else {
-              setUploadStatus(stage);
-            }
-          },
-        });
-        if (cancelRef.current) return;
-        extractionRef.current = {source, result};
-        setSbdExtraction({source, result});
-        uploadSelection = {...selected, sbd: [result.file]};
-        setExtracting(false);
-        abortRef.current = null;
-      }
-      setExtracting(true);
+      setPreparingFiles(true);
       abortRef.current = new AbortController();
       const optimized = new Map<File, PngOptimization>();
       uploadSelection = {...uploadSelection};
@@ -482,7 +451,7 @@ export function ProjectHome({
         }
       }
       setImageOptimizations(optimized);
-      setExtracting(false);
+      setPreparingFiles(false);
       abortRef.current = null;
       const uploadFiles = uploadRoles.flatMap((role) => uploadSelection[role].map((file) => ({role, file})));
       let currentSession = session && uploadSessionMatches(session, uploadSelection)
@@ -595,7 +564,7 @@ export function ProjectHome({
       }
     } finally {
       abortRef.current = null;
-      setExtracting(false);
+      setPreparingFiles(false);
       setUploading(false);
     }
   };
@@ -665,18 +634,17 @@ export function ProjectHome({
                 })}</div> : <StatusMark className="upload-empty" status="pending" size={14} fontSize={10} label={t.home.noFileSelected} />}
               </div>)}
             </div>
-            {sbdExtraction && sbdExtraction.source === selected.sbd[0] && <Typography.Paragraph type="secondary"><TranslatedText text={t.home.sbdExtractionSummary((sbdExtraction.result.stats.sourceBytes / 1024 / 1024).toFixed(1), (sbdExtraction.result.file.size / 1024 / 1024).toFixed(1))} /></Typography.Paragraph>}
             {checkedImages.length > 0 && <Typography.Paragraph type="secondary"><TranslatedText text={optimizedImageBytes < originalImageBytes
               ? t.home.pngOptimizationSummary((originalImageBytes / 1024 / 1024).toFixed(1), (optimizedImageBytes / 1024 / 1024).toFixed(1))
               : t.home.pngOptimizationSkipped} /></Typography.Paragraph>}
-            {session && <Alert type="info" showIcon message={<TranslatedText text={t.home.sessionDetectedTitle} />} description={<TranslatedText text={legacySbdSession ? t.home.sessionLegacy : uploadSessionMatches(session, preparedSelection) ? t.home.sessionMatched : t.home.sessionReselect} />} />}
-            {(extracting || uploading || uploadedBytes > 0 || (session && uploadStatus) || cancelRef.current && uploadStatus) && <div className="upload-progress-block" role="status">
+            {session && <Alert type="info" showIcon message={<TranslatedText text={t.home.sessionDetectedTitle} />} description={<TranslatedText text={uploadSessionMatches(session, preparedSelection) ? t.home.sessionMatched : t.home.sessionReselect} />} />}
+            {(preparingFiles || uploading || uploadedBytes > 0 || (session && uploadStatus) || cancelRef.current && uploadStatus) && <div className="upload-progress-block" role="status">
               <div className="upload-progress-heading">
-                <StatusMark status={overallStatus} progress={!extracting && totalBytes > 0 ? Math.min(1, uploadedBytes / totalBytes) : undefined}
+                <StatusMark status={overallStatus} progress={!preparingFiles && totalBytes > 0 ? Math.min(1, uploadedBytes / totalBytes) : undefined}
                   size={20} label={uploadStatus || t.home.uploadStatusPreparing} />
-                {!extracting && totalBytes > 0 && <span className="upload-progress-percent"><TranslatedText text={t.home.uploadProgressPercent(Math.min(100, Math.round(uploadedBytes / totalBytes * 100)))} /></span>}
+                {!preparingFiles && totalBytes > 0 && <span className="upload-progress-percent"><TranslatedText text={t.home.uploadProgressPercent(Math.min(100, Math.round(uploadedBytes / totalBytes * 100)))} /></span>}
               </div>
-              {!extracting && totalBytes > 0 && <>
+              {!preparingFiles && totalBytes > 0 && <>
                 <Progress percent={Math.min(100, Math.round(uploadedBytes / totalBytes * 100))} showInfo={false}
                   status={uploadError ? 'exception' : uploadCompleted ? 'success' : 'normal'} strokeColor="#2d6a5b" />
                 <Typography.Text type="secondary">{(uploadedBytes / 1024 / 1024).toFixed(1)} / {(Math.max(totalBytes, selectedTotal) / 1024 / 1024).toFixed(1)} MB</Typography.Text>
@@ -684,9 +652,9 @@ export function ProjectHome({
             </div>}
             <Space wrap className="home-actions">
               <Button type="primary" onClick={startUpload} disabled={!canStart} loading={uploading && !paused && !uploadCompleted}><TranslatedText text={uploadCompleted ? t.home.btnUploadComplete : t.home.btnStartUpload} /></Button>
-              {uploading && !extracting && session && session.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}><TranslatedText text={paused ? t.home.btnResumeUpload : t.home.btnPauseUpload} /></Button>}
+              {uploading && !preparingFiles && session && session.status !== 'assembling' && <Button icon={<PauseOutlined />} onClick={() => {pauseRef.current = !pauseRef.current; setPaused(pauseRef.current);}}><TranslatedText text={paused ? t.home.btnResumeUpload : t.home.btnPauseUpload} /></Button>}
               {!uploading && paused && session && <Button icon={<PlayCircleOutlined />} onClick={startUpload}><TranslatedText text={t.home.btnResumeUpload} /></Button>}
-              {(extracting || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}><TranslatedText text={extracting ? t.home.btnCancelExtract : t.home.btnCancelUpload} /></Button>}
+              {(preparingFiles || session && session.status !== 'assembling') && <Button danger onClick={cancelUpload}><TranslatedText text={t.home.btnCancelUpload} /></Button>}
               {demoAvailable && <Button onClick={onDemo} disabled={busy || uploading}><TranslatedText text={t.home.btnLoadDemo} /></Button>}
             </Space>
             {(error || uploadError) && <Alert type="error" showIcon message={<TranslatedText text={t.common.operationFailed} />} description={error || uploadError} />}

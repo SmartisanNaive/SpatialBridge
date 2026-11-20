@@ -17,7 +17,7 @@ import zlib
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +32,7 @@ from .lattice import evaluate_coordinate_model
 from .registration import build_project, find_inputs, make_browser_preview, make_quick_preview_thumbnail
 from .storage import Store
 from .sbd import materialize_sbd_package, validate_sbd_extract
+from .spectra import SBDReader, SpectraUnavailable
 from .tiles import blank_tile, build_tile_pyramid, common_tile, pyramid_tile
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,23 @@ class UploadFileRequest(BaseModel):
 class UploadCreateRequest(BaseModel):
     project_name: str | None = None
     files: list[UploadFileRequest]
+
+
+class SpectralSourceRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class IonTarget(BaseModel):
+    mz: float = Field(gt=0, allow_inf_nan=False)
+    tolerance: float = Field(default=5, ge=0, allow_inf_nan=False)
+    unit: Literal["ppm", "Da"] = "ppm"
+
+
+class IonRequest(BaseModel):
+    targets: list[IonTarget] = Field(min_length=1, max_length=32)
+    aggregation: Literal["sum", "max"] = "sum"
+    normalization: str | None = None
+    region: str | None = None
 
 
 class ViewRequest(BaseModel):
@@ -695,6 +713,105 @@ def create_app(data_dir: Path, frontend_dir: Path | None = None) -> FastAPI:
         if not saved:
             return {"viewport": None, "settings": {}, "version": 2}
         return saved
+
+    def spectral_project(project_id: str) -> dict:
+        project = store.get_project(project_id)
+        if not project:
+            raise HTTPException(404, "Project not found")
+        return project
+
+    def spectral_source(project_id: str, project: dict) -> Path:
+        attachment = data_dir / "projects" / project_id / "spectra-source.json"
+        if attachment.is_file():
+            value = json.loads(attachment.read_text(encoding="utf-8"))["path"]
+        else:
+            value = ((project.get("report") or {}).get("maldi_data") or {}).get("path")
+        if not value:
+            raise SpectraUnavailable("项目尚未关联完整 SBD 文件，请填写本机 SBD 路径。")
+        source = resolve_project_file(value, project_id)
+        if not source.is_file():
+            raise SpectraUnavailable("完整 SBD 源文件不存在，请重新关联本机文件或上传。")
+        return source
+
+    def spectral_error(error: Exception) -> HTTPException:
+        return HTTPException(400, f"读取 SBD 质谱失败：{error}")
+
+    @app.get("/api/projects/{project_id}/spectra")
+    def spectra_summary(project_id: str) -> dict:
+        project = spectral_project(project_id)
+        try:
+            with SBDReader(spectral_source(project_id, project)) as reader:
+                return reader.summary()
+        except SpectraUnavailable as error:
+            return {"available": False, "reason": str(error), "normalizations": [], "mean_spectra": [], "regions": []}
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            raise spectral_error(error) from error
+
+    @app.post("/api/projects/{project_id}/spectra/source")
+    def attach_spectral_source(project_id: str, request: SpectralSourceRequest) -> dict:
+        project = spectral_project(project_id)
+        source = Path(request.path).expanduser().resolve()
+        if not source.is_file() or source.suffix.lower() != ".sbd":
+            raise HTTPException(400, "请提供后端所在机器上存在的完整 .sbd 文件路径")
+        try:
+            with SBDReader(source) as reader:
+                summary = reader.summary()
+                existing = ((project.get("report") or {}).get("maldi_data") or {})
+                if existing.get("spot_count") is not None and existing["spot_count"] != reader.spot_count:
+                    raise ValueError("此 SBD 点位数量与项目不同，请关联原始 SBD")
+                # A compact import still preserves original coordinates and raster IDs.
+                # Verify identity before exposing spectral spot IDs alongside its mapping.
+                if existing.get("path"):
+                    import h5py
+                    previous = resolve_project_file(existing["path"], project_id)
+                    if previous.is_file() and previous != source:
+                        with h5py.File(previous, "r") as old:
+                            for key in ("Registrations/0/OriginalCoordinates", "MeasurementRasterIndices"):
+                                if key not in old or key not in reader.handle or not np.array_equal(old[key][...], reader.handle[key][...]):
+                                    raise ValueError("此 SBD 的点位坐标或 raster 与项目不同，请关联原始 SBD")
+                            old_uuid = old.attrs.get("uuid")
+                            new_uuid = reader.handle.attrs.get("uuid")
+                            if old_uuid is not None and new_uuid is not None and not np.array_equal(old_uuid, new_uuid):
+                                raise ValueError("此 SBD 的数据标识与项目不同，请关联原始 SBD")
+            directory = data_dir / "projects" / project_id
+            directory.mkdir(parents=True, exist_ok=True)
+            temporary = directory / f"spectra-source-{uuid.uuid4().hex}.tmp"
+            try:
+                temporary.write_text(json.dumps({"path": str(source)}, ensure_ascii=False), encoding="utf-8")
+                temporary.replace(directory / "spectra-source.json")
+            finally:
+                temporary.unlink(missing_ok=True)
+            return summary
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            raise spectral_error(error) from error
+
+    @app.get("/api/projects/{project_id}/spectra/mean")
+    def mean_spectrum(project_id: str, id: str) -> dict:
+        project = spectral_project(project_id)
+        try:
+            with SBDReader(spectral_source(project_id, project)) as reader:
+                return reader.mean_spectrum(id)
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            raise spectral_error(error) from error
+
+    @app.get("/api/projects/{project_id}/spectra/spots/{spot_id}")
+    def spot_spectrum(project_id: str, spot_id: int) -> dict:
+        project = spectral_project(project_id)
+        try:
+            with SBDReader(spectral_source(project_id, project)) as reader:
+                return reader.spot_spectrum(spot_id)
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            raise spectral_error(error) from error
+
+    @app.post("/api/projects/{project_id}/spectra/ions")
+    def ion_signals(project_id: str, request: IonRequest) -> dict:
+        project = spectral_project(project_id)
+        try:
+            with SBDReader(spectral_source(project_id, project)) as reader:
+                return reader.ion_signals([target.model_dump() for target in request.targets], request.aggregation,
+                                          request.normalization, request.region)
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            raise spectral_error(error) from error
 
     def spot_cache(project_id: str, project: dict) -> Path:
         mapping = (project.get("report") or {}).get("spatial_mapping") or {}

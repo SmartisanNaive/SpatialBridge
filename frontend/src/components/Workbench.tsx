@@ -68,6 +68,7 @@ import {
 } from '../utils';
 import {TranslatedText, useI18n} from '../i18n';
 import {CanvasViewer} from './CanvasViewer';
+import {SpectraPanel} from './SpectraPanel';
 
 export function ToolButton({
   icon,
@@ -110,6 +111,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
   const [manualPoints, setManualPoints] = useState<ManualPoint[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 680);
   const [reportOpen, setReportOpen] = useState(false);
+  const [spectraOpen, setSpectraOpen] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showPits, setShowPits] = useState(true);
   const [overlayOpacity, setOverlayOpacity] = useState(86);
@@ -637,6 +639,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         }
         actions={
           <>
+            <Button type="text" icon={<FileSearchOutlined />} onClick={() => setSpectraOpen(true)}>{language === 'zh' ? '光谱数据' : 'Spectra'}</Button>
             <Tooltip title={<TranslatedText text={t.workbench.reportTitle} />}>
               <Button type="text" icon={<FileSearchOutlined />} onClick={() => setReportOpen(true)}><TranslatedText text={t.workbench.reportBtn} /></Button>
             </Tooltip>
@@ -650,11 +653,13 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
           <Dropdown
             className="mobile-actions"
             menu={{items: [
+              {key: 'spectra', label: language === 'zh' ? '光谱数据' : 'Spectra'},
               {key: 'report', label: t.workbench.viewReportAction},
               {key: 'export', label: t.workbench.exportCsvAction, disabled: !maldiAvailable},
               {key: 'lang', label: language === 'zh' ? 'English (EN)' : '中文版 (ZH)'},
               {key: 'home', label: t.common.backHome},
             ], onClick: ({key}) => {
+              if (key === 'spectra') setSpectraOpen(true);
               if (key === 'report') setReportOpen(true);
               if (key === 'export' && maldiAvailable) window.open(`${apiUrl(`/projects/${project.id}/burn-pits.csv`)}${selectedFieldKey ? `?field=${encodeURIComponent(selectedFieldKey)}` : ''}`, '_blank');
               if (key === 'lang') toggleLanguage();
@@ -665,6 +670,10 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
           </Dropdown>
         }
       />
+
+      <Drawer title={language === 'zh' ? '光谱数据' : 'Spectral data'} open={spectraOpen} onClose={() => setSpectraOpen(false)} width={760} destroyOnClose>
+        {spectraOpen && <SpectraPanel key={project.id} projectId={project.id} />}
+      </Drawer>
 
       <div className="workspace-body">
         <aside className={`control-sidebar${sidebarOpen ? '' : ' is-hidden'}`} aria-label={t.workbench.sidebarTitle}>
