@@ -69,6 +69,7 @@ import {
 import {TranslatedText, useI18n} from '../i18n';
 import {CanvasViewer} from './CanvasViewer';
 import {SpectraPanel} from './SpectraPanel';
+import {SpotSpectrum} from './SpotSpectrum';
 
 export function ToolButton({
   icon,
@@ -879,6 +880,7 @@ export function Workbench({project, onHome}: {project: Project; onHome: () => vo
         {spotLoading ? <motion.div className="drawer-loading" initial={{opacity: 0}} animate={{opacity: 1}} transition={{duration: reducedMotion ? 0 : .18}}><Spin /><span><TranslatedText text={t.workbench.loadingSbdData} /></span></motion.div> : selectedSpot && (
           <motion.div className="spot-inspector" initial={{opacity: 0, x: 12}} animate={{opacity: 1, x: 0}} transition={{duration: reducedMotion ? 0 : .2}}>
             <div className="spot-hero"><span className="spot-id">SPOT #{selectedSpot.spot_id}</span><Tag color={selectedSpot.detected ? 'success' : 'default'}><TranslatedText text={selectedSpot.detected ? t.workbench.spotDetected : t.workbench.spotCandidate} /></Tag><strong>{spotNumber(selectedSpot.value, 3)}</strong><small><TranslatedText text={selectedSpot.field_label ?? t.workbench.currentNormField} /></small></div>
+            <SpotSpectrum key={`${project.id}:${selectedSpot.spot_id}`} projectId={project.id} spotId={selectedSpot.spot_id} onOpenData={() => setSpectraOpen(true)} />
             <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.heatmapColorSample} /></div>{selectedSpot.raster === (mapping?.primary_raster ?? 0) && heatmapColors.has(selectedSpot.spot_id) ? <div className="inspector-value"><span><TranslatedText text={heatmap?.label || heatmap?.filename || t.workbench.heatmapPng} /></span><strong><span aria-hidden="true" style={{display: 'inline-block', width: 14, height: 14, background: heatmapColors.get(selectedSpot.spot_id), border: '1px solid currentColor', marginRight: 8, verticalAlign: 'middle'}} />{heatmapColors.get(selectedSpot.spot_id)}</strong></div> : <Typography.Text type="secondary"><TranslatedText text={t.workbench.noColorSample} /></Typography.Text>}</div>
             <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.normValues} /></div>{selectedSpot.normalizations?.length ? selectedSpot.normalizations.map((value) => <div className={`inspector-value${value.key === (selectedSpot.field_key ?? selectedFieldKey) ? ' is-selected' : ''}`} key={value.key}><span>{value.label}</span><strong>{spotNumber(value.value, 3)}</strong></div>) : <Typography.Text type="secondary"><TranslatedText text={t.workbench.noNormValues} /></Typography.Text>}</div>
             <div className="inspector-section"><div className="inspector-label"><TranslatedText text={t.workbench.spatialCoordInfo} /></div><Descriptions column={1} size="small">
