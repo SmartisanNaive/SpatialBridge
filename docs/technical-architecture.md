@@ -1,171 +1,116 @@
-# SpatialBridge 技术架构与计算机视觉算法解析
+# SpatialBridge 技术架构
 
-[← 返回文档索引](README.md) | [返回 README](../../README.md)
+[← 返回文档索引](README.md) | [返回项目首页](../README.md)
 
-SpatialBridge 是一套专为**单细胞/高分辨率 MALDI 质谱成像与显微图像跨模态空间配准**设计的系统。本文档深入解析其底层计算机视觉算法、坐标链几何学、流式切片引擎以及端侧前置计算架构。
+SpatialBridge 的空间配准与质谱读取共用项目和 SBD 点位编号。配准负责建立显微图与采样网格的对应关系；质谱读取保留文件数值语义，按需返回平均谱、单点谱或质量窗口信号。
 
----
+## 1. 总体架构与数据流
 
-## 1. 总体架构与数据流转
+浏览器使用 React、OpenSeadragon 和 Canvas；FastAPI 同时提供生产前端、API、瓦片、处理预览与 CSV。常规运行只有一个应用进程：
 
-系统分为**浏览器轻量前置层**、**FastAPI 核心计算服务**与**持久化数据存储**三层：
+```bash
+npm --prefix frontend run build
+.venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
+```
+
+Vite 是可选开发工具，见[部署与运维](deployment.md)。
 
 ```mermaid
 flowchart TD
-    subgraph Client["前端与客户端前置计算 (React + OpenSeadragon + Web Worker)"]
-        UI["用户交互工作台 (卷帘对比/点位查询)"]
-        WASM["Web Worker: h5wasm 虚拟切片提取 (5.4GB SBD -> 27MB 包)"]
-        PNG_OPT["Web Worker: 原生 Deflate 流式无损检查"]
-        CANVAS["Canvas 视口裁剪与批量 Path 渲染 (100k+ Spots)"]
-    end
-
-    subgraph Server["后端计算引擎 (FastAPI + OpenCV + NumPy + Pillow + PyVIPS)"]
-        API["HTTP API / 分片装配与校验 (16 MiB/片)"]
-        QUEUE["单图像任务串行排队队列 (max_workers=1, 防 OOM)"]
-        CV_REG["8 点方孔单应配准 (RMSE < 1e-12 px)"]
-        CV_LAT["FLANN 近轴拓扑 + 留出集多项式晶格拟合 (SpaceM 演进)"]
-        TILE_ENG["单通道 L 模式多线程 Lanczos 金字塔切片"]
-        CACHE["动态渲染瓦片缓存 (rendered-tiles) + LRU 内存缓存"]
-    end
-
-    subgraph Storage["数据持久化层 (宿主机目录)"]
-        SQLITE["SQLite 数据库 (projects, uploads, views)"]
-        FILES["原始来源与精简包 (uploads/files/)"]
-        PYRAMIDS["多级瓦片金字塔 (projects/pyramids/)"]
-        REPORTS["分析报告 (report.json & sbd-spots.npz)"]
-    end
-
-    WASM -->|"上传精简 .sbdx 包"| API
-    PNG_OPT -->|"上传显微 PNG"| API
-    API --> QUEUE
-    QUEUE --> CV_REG
-    QUEUE --> CV_LAT
-    QUEUE --> TILE_ENG
-    CV_REG --> REPORTS
-    CV_LAT --> REPORTS
-    TILE_ENG --> PYRAMIDS
-    API --> SQLITE
-    UI <-->|"按需动态拉取瓦片与点位"| API
-    API <--> CACHE
+    FILES["完整 SBD 与显微 PNG、可选热图 PNG"] --> UPLOAD["16 MiB 分片、SHA-256 与续传"]
+    UPLOAD --> STORE["数据目录：完整来源文件与 SQLite"]
+    STORE --> QUEUE["串行图像处理队列"]
+    QUEUE --> REG["标志物配准、坐标链与晶格拟合"]
+    QUEUE --> TILES["多尺度瓦片与诊断预览"]
+    REG --> REPORT["report.json 与 sbd-spots.npz"]
+    STORE --> READER["spectra.py：只读、按需解码"]
+    REPORT --> API["FastAPI 同源服务"]
+    TILES --> API
+    READER --> API
+    API --> UI["工作台、点位详情、光谱数值与 CSV"]
 ```
 
----
+`app.py` 负责接口和任务编排；`registration.py`、`integration.py`、`lattice.py`、`heatmap.py`、`tiles.py` 与 `spectra.py` 承担计算和数据读取。SQLite 保存项目、上传及人工标注等状态；项目目录保存报告、图像缓存和可选 `spectra-source.json`。
 
-## 2. 核心计算机视觉算法深度解析
+## 2. 显微图与空间配准
 
-### 2.1 标志物亚像素单应配准（8 点方孔算法）
+### 标志物单应变换
 
-#### 痛点与挑战
-显微图单张尺寸通常高达 $73,000 \times 8,500$ 像素（约 6.3 亿像素），在机械平台长轴扫描拼接时，两端存在微小但不可忽略的**进给误差、比例尺漂移、剪切角与梯形失真**。
-传统的刚体变换或相似变换（4 个自由度：平移 $(\Delta x, \Delta y)$、旋转 $\theta$、各向同性缩放 $s$）只能利用两个标志物的几何中心：
+`registration.py` 的标志物检测使用多阈值、正反极性轮廓树，结合圆形度、内孔四边形和面积比例筛选标志物。两个标志物各提供四个方孔角点，合计八点。
 
-$$\begin{bmatrix} x' \\ y' \\ 1 \end{bmatrix} = \begin{bmatrix} s\cos\theta & -s\sin\theta & t_x \\ s\sin\theta & s\cos\theta & t_y \\ 0 & 0 & 1 \end{bmatrix} \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}$$
+配准枚举角点循环相位、绕向与标志物配对，调用 `cv2.findHomography` 求解：
 
-该模型无法表达剪切和透视形变，导致长轴边缘处的点位映射出现数个像素的累积偏差。
+$$p' \sim H p, \quad H \in \mathbb{R}^{3\times3}.$$
 
-#### 算法实现机制
-1. **多阈值双极性轮廓树分析 (`detect_markers`)**：
-   - 采用多级阈值（步长 15，覆盖 35 到 221）分别在正相与反相二值化下检测轮廓树（`cv2.RETR_TREE`）。
-   - **外轮廓筛选**：计算轮廓圆形度 $C = \frac{4\pi \cdot \text{Area}}{\text{Perimeter}^2} > 0.65$。
-   - **内轮廓筛选**：使用多边形逼近（`cv2.approxPolyDP`，公差设为周长的 3.5%），严格要求为凸四边形，且宽高比在 $0.65 \sim 1.4$ 之间。
-   - **面积比约束**：要求外轮廓与内方孔的面积比满足 $3 < \frac{\text{Area}_{\text{outer}}}{\text{Area}_{\text{inner}}} < 12$。
-   - **亚像素矩中心计算**：通过空间矩（`cv2.moments`）精确提取质心坐标，并应用非极大值抑制（NMS，50 px 距离抑制）。
-2. **特征角点提取与相位枚举 (`order_quad`)**：
-   - 提取每个方形内孔的 4 个物理顶点，两个标志物合计获取 **8 个高信噪比特征点**。
-   - 由于检测器无法直接确认方孔顶点的绝对起始相位与绕向，算法遍历 4 种循环位移与顺逆时针镜像排列，组合出所有的拓扑对应方案。
-3. **8 自由度单应矩阵拟合 (`cv2.findHomography`)**：
-   - 利用 8 个点求解单应矩阵 $H \in \mathbb{R}^{3 \times 3}$：
-     $$p' \sim H p \quad \text{其中} \quad H = \begin{bmatrix} h_{11} & h_{12} & h_{13} \\ h_{21} & h_{22} & h_{23} \\ h_{31} & h_{32} & 1 \end{bmatrix}$$
-   - 以角点重投影 RMSE 作为评分标准选取最优配准方案。在实测数据中，中心重投影 RMSE 达到浮点极限 $\sim 10^{-13}\text{ px}$。
+候选需通过有限性与局部方向检查。评分使用角点中位数、p95 和标志物中心误差；正常输入优先保持左右配对。报告同时给出中心 RMSE 与角点误差，应区分其含义。某些参考数据的中心残差接近浮点精度，但这不代表组织区域或全图达到同等独立精度，单应变换也不能描述任意非刚性形变。
 
-![Subpixel 8-Corner Homography Registration](images/homography-registration.png)
+![八点方孔单应配准](images/homography-registration.png)
 
----
+### 坐标链与 raster
 
-### 2.2 激光灼烧坑检测与光学晶格流形拟合
+空间链可表示为：
 
-激光灼烧坑（Laser Ablation Burn Pits）是 MALDI 激光脉冲在载玻片或生物组织表面形成的微米级凹坑。
+$$\text{SBD World} \rightarrow \text{板图像素} \rightarrow \text{热图像素} \rightarrow \text{采集后像素} \rightarrow \text{采集前像素}.$$
 
-```mermaid
-flowchart LR
-    A["高对比度清晰区域"] --> B["高斯带通滤波与响应峰检测"]
-    B --> C["FLANN KD-Tree 近轴邻接连接<br/>(容忍 1~2 个断点)"]
-    C --> D["BFS 连通图搜索与<br/>冲突环检测 (Cycle Conflicts)"]
-    D --> E["SBD 稀疏点阵离散互相关<br/>(确定原点与镜像)"]
-    E --> F["空间分块留出集评估<br/>(Affine vs Deg-2 vs Deg-3)"]
-    F --> G["选定 sbd-optical-lattice-v2-degree2<br/>消除玻片形变并防过拟合"]
-```
+板图通常从 SBD 读取。板图与热图纹理匹配后，以 `OriginalCoordinates` 做独立一致性检查；raster 的 `PixelToWorld`、可逆性、回算误差及显微图覆盖范围写入报告。矩阵显式约定 `xy` / `yx`，避免以数组行列顺序隐式决定方向。
 
-#### 算法实现机制
-1. **近轴拓扑恢复 (`trace_lattice`)**：
-   - 针对组织较厚区域灼烧坑对比度低、易漏检的问题，系统借鉴 SpaceM 的拓扑恢复思想，不进行全图盲目检测，而是从局部信噪比最高的区域切入。
-   - 使用 OpenCV FLANN 建立 4 棵随机 KD-Tree（`cv2.flann_Index`），按激光步长 $pitch$ 沿横向与纵向检索近邻候选节点。
-   - 允许跳过 1 到 2 个缺失节点（即距离为 $1\times, 2\times, 3\times pitch$），建立有向网格图。
-   - 执行广度优先搜索（BFS），统计回路冲突（Cycle Conflicts），确保恢复出的晶格结构无逻辑矛盾。
-2. **离散轮廓互相关定位 (`match_outline`)**：
-   - SBD 中记录了采集斑点的稀疏轮廓（由于仅在组织覆盖区激发激光，轮廓具有天然的不规则几何形状）。
-   - 将恢复出的局部整数网格索引与 SBD 稀疏轮廓进行 2D 离散互相关计算，确定全局整数行列坐标 $(u, v)$ 与镜像翻转标志。
-3. **空间留出集多项式曲面模型选择 (`evaluate_coordinate_model`)**：
-   - 为消除载玻片在长焦镜头下的非线性微翘曲，系统引入多项式基函数拟合：
-     - **Degree 1 (Affine)**: $[1, x, y]$（3 项）
-     - **Degree 2 (Quadric)**: $[1, x, y, x^2, xy, y^2]$（6 项）
-     - **Degree 3 (Cubic)**: $[1, x, y, x^2, xy, y^2, x^3, x^2y, xy^2, y^3]$（10 项）
-   - **空间留出集（Spatial Hold-out Cross-Validation）**：将点位按空间区域进行 $K$ 折分块（而非随机打乱，防止空间自相关导致误差虚低）。
-   - 评估各模型在未参与拟合区域的预测 RMSE 与 $p95$ 误差。实测证明：**Degree-2 模型**能在消除物理翘曲的同时杜绝边缘发散与过拟合。
+参考样本 raster 0 的一致性 p95 小于 1 px。其他 raster 或有效校准域外的点不能据此认定已映射，需检查报告。纹理匹配只能证明几何相似性，同次采集仍需核对来源。
 
-![Laser Burn-Pit Optical Lattice Recovery & Polynomial Manifold Fitting](images/lattice-workflow.png)
+![多模态坐标链](images/coordinate-chain.png)
 
----
+### 灼烧坑与光学晶格
 
-### 2.3 闭环多模态坐标链验证
+`lattice.py` 借鉴 SpaceM 从清晰区域恢复规则晶格的思路：
 
-SpatialBridge 建立了多模态严格闭环映射矩阵链：
+1. 从高对比区域的带通响应检测候选节点。
+2. 用 FLANN 近轴邻接和图遍历恢复整数网格，容忍缺失节点并记录回路冲突。
+3. 与 SBD 非对称稀疏轮廓互相关，确定原点、方向与镜像。
+4. 对仿射、二阶和三阶归一化多项式做空间分块留出验证。
 
-$$\text{SBD World} \xrightarrow{M_{\text{W2B}}} \text{板图像素} \xrightarrow{M_{\text{B2H}}} \text{热图像素} \xrightarrow{M_{\text{H2A}}} \text{采集后显微像素} \xrightarrow{H_{\text{A2P}}} \text{采集前显微像素}$$
+候选需通过与晶格间距相关的中位数、p95、分区误差和模型折叠/边界检查。从合格低阶模型开始，升阶还要求 p95 至少改善 15%，且分区 p95 恶化不超过 10%。当前参考数据选择二阶模型；这不是所有输入的固定结果，也不构成对过拟合的绝对保证。
 
-- **一致性门禁**：利用 SBD 中的 `OriginalCoordinates`（原始电机步进计数值）进行独立的闭环反向投影检验，若闭环重投影误差 $p95 \ge 1.0\text{ px}$，则标记警告或拦截，确保科学实验数据的高度可靠性。
+`coordinate_model` 是权威位置模型；旧矩阵只保留仿射近似。网格四角由同一模型求值，局部响应峰用于确认和诊断，不逐点移动或重编号。
 
-![Multi-Modal Closed-Loop Coordinate Chain & Transformation Pipeline](images/coordinate-chain.png)
+![灼烧坑与晶格拟合](images/lattice-workflow.png)
 
----
+## 3. 大图处理与浏览
 
-### 2.4 亿级像素多尺度瓦片金字塔与反向透视采样
+图像密集任务经 `ThreadPoolExecutor(max_workers=1)` 串行执行，避免多个超大图项目同时解码造成内存峰值叠加。金字塔构建尽可能保留灰度通道，避免全幅提前膨胀为 RGBA；可选 pyvips 加速大图处理。
 
-#### 内存解耦与切片生成 (`tiles.py`)
-- **内存优化**：显微图原生为灰度图。加载时严格强制为单通道 `L` 模式（$74,000 \times 8,500 \times 1\text{ byte} \approx 630\text{ MB}$）。如果错误转换为 RGBA 格式，单图内存将瞬间膨胀至 $2.52\text{ GB}$。
-- **多线程下采样**：采用多线程 Lanczos 插值生成 $256 \times 256$ 瓦片。切片编码为 PNG 格式期间会释放 Python GIL，因此可跑满多核 CPU（默认利用最多 8 个工作线程）。
+`tiles.py` 生成 256×256 多尺度瓦片。请求配准图层时，后端反向映射目标瓦片，仅读取相交源瓦片并局部 `warpPerspective`，随后落盘缓存。浏览器按可见范围与屏幕密度筛选网格，Canvas 批量绘制足迹。性能依赖数据、硬件、缓存状态与视野，不能把特定机器上的帧率或耗时视为保证。
 
-#### 实时反向单应透视采样 (`pyramid_tile`)
-- 前端 OpenSeadragon 视口在缩放、旋转或平移时，后端不预先渲染整张变形后的大图，而是按请求的切片位置 $(z, x, y)$ 进行**反向投影逆变换**：
-  $$p_{\text{source}} = H^{-1} p_{\text{target}}$$
-- 仅从源金字塔中读取相交的小瓦片（`read_pyramid_region`），在内存中拼接微小局部后调用 `cv2.warpPerspective` 输出当前切片，并写入 `rendered-tiles` 缓存目录。该机制使得数十亿像素的超大图可以在毫秒级完成实时卷帘对比。
+工作台支持采集前、采集后与卷帘视图，自动延续当前标签页会话的视野和观察设置。人工标注单独持久化。点位详情以 spot ID 连接几何与光谱，原始编号不会因排序或显示抽样改变。
 
----
+## 4. 上传与来源文件
 
-## 3. 客户端前置轻量计算架构
+### 完整 SBD
 
-为了避免将数十吉字节的原始文件上传至服务器造成网络与存储拥塞，系统在前端浏览器中执行了前置轻量计算：
+`ProjectHome.tsx` 对 SBD 直接使用原始 `File`，完整文件进入现有分片上传、校验、合并与续传流程。配准不需要把所有光谱读入内存，但服务器仍需保存整个文件并为上传合并预留磁盘空间。
 
-### 3.1 基于 WebAssembly 的 SBD 虚拟切片提取
-- 工业级 SBD（HDF5 格式）通常包含海量连续原始质谱光谱，体积常在 $5\text{ GB} \sim 20\text{ GB}$。
-- 前端通过 Web Worker 运行 `h5wasm 0.10.3`，利用 Emscripten `WORKERFS` 虚拟文件系统挂载用户本地 `File`。
-- **按需分段读取**：底层通过 `Blob.slice` 进行只读随机偏移寻址（每次读取上限 4 MiB），不将全文件载入浏览器内存。
-- 仅提取空间拓扑相关的子树（`Registrations`、`MeasurementRasterIndices`、`Normalizations`、`OpticalImages`），将其打包为仅约 $27\text{ MB}$ 的 `.sbdx` 精简包上传。浏览器 WASM 线性内存占用仅约 **24 MB**。
+`h5wasm`、`.sbdx` 提取和后端还原代码仍用于历史格式兼容；当前网页不再自动把 SBD 替换为仅含坐标、raster、归一化因子与板图的精简包。旧项目读取光谱时必须取得完整 SBD。
 
-### 3.2 浏览器原生 Deflate 流式无损检查
-- 显微 PNG 在上传前由前端 Worker 利用浏览器原生 `CompressionStream` 与 `DecompressionStream` 检查流式 IDAT 数据。
-- **保守复用策略**：若检测到原图已是高压缩比输出（重压无收益或收益小于 3%），则直接原样上传，避免无意义的浏览器重压缩与服务器解压开销。
+### PNG 无损优化
 
----
+Worker 用浏览器原生 Deflate API 流式重压 IDAT，保持解压扫描行、尺寸、位深及非 IDAT 块。已充分压缩或收益不足的 PNG 直接复用，不通过 Canvas 改写原图。优化有大小和能力限制；超限或失败回退原文件。详细机制和既有测试见[配准方法与输出](algorithm.md#浏览器本地无损优化-png)。
 
-## 4. 关键算法配置与性能指标汇总
+### 路径与迁移
 
-| 算法阶段 | 核心技术 / 库 | 关键参数 / 模型 | 性能表现 / 精度 |
-| :--- | :--- | :--- | :--- |
-| **标志物定位** | OpenCV `findContours` + 形态学 | 阈值步长 15，圆形度 $> 0.65$，面积比 $3\sim 12$ | 检出率 $100\%$，抗低光照与噪声 |
-| **双图配准** | OpenCV `findHomography` | 8 点方孔角点拟合，4 相位遍历枚举 | 重投影 RMSE $< 10^{-12}\text{ px}$ |
-| **晶格重构** | FLANN KD-Tree + BFS 拓扑遍历 | 容忍 1~2 个断点，循环冲突检测 | 毫秒级恢复完整网格拓扑 |
-| **曲面拟合** | 空间留出集多项式拟合 | `sbd-optical-lattice-v2-degree2`（6 参数） | 消除玻片微翘曲，留出集 $p95 < 1\text{ px}$ |
-| **瓦片切片** | Pillow / PyVIPS + ThreadPool | $256 \times 256$ 瓦片，单通道 `L` 模式，8 线程 | 6.3 亿像素双图切片约 1~2 分钟 |
-| **在线渲染** | `cv2.warpPerspective` 局部切片逆投影 | 按需局部四边形采样，落盘缓存 | 瓦片请求响应时间 $< 30\text{ ms}$ |
-| **端侧 SBD 提取** | WebAssembly (`h5wasm`) + Worker | 只读切片遍历，输出 `.sbdx` 精简包 | 5.4 GB 输入仅耗 24 MB 内存，几秒完成 |
+数据目录内来源及缓存采用 `data://` / `project://` 相对引用。目录导入和后端本地 SBD 关联可引用外部绝对路径，关联不会复制文件。跨机器部署时必须保证这些路径存在或重新关联；容器内需要相应只读挂载。
+
+## 5. 独立 SBD 光谱读取
+
+`backend/spatialbridge/spectra.py` 基于 h5py、NumPy、zlib 和 struct 独立实现 SCiLS Peaks 质心格式读取，运行时不依赖 imzy、外部源码目录或 Bruker SDK。每次请求持有独立只读 HDF5 句柄，读取全局轴、较小偏移表及所选压缩块。
+
+| 数据表示 | 返回内容 | 语义 |
+| --- | --- | --- |
+| 保存的平均光谱 | 全局轴与 `MeanSpectra` 强度 | 直接读取，保留区域/归一化标识，不重算 |
+| spectrum-major | 精确单点质心 m/z 与配对强度 | 还原定点质量编码，点 ID 从 0 开始 |
+| image-major | 多目标的逐点信号 | 按全局分箱中心的闭区间筛选，sum/max 聚合 |
+
+单点 m/z 参数位于 zlib 流后的 `<Bdd` 尾部；索引数据由字节平面还原小端 delta 再累加。读取器校验偏移、长度、压缩流、索引范围和数值有效性。
+
+离子提取支持 1–32 个目标，全部窗口合计最多 4,096 个分箱，可筛选保存的区域并以 `raw / Values[spot_id]` 归一化。非正因子输出 0。全局分箱与精确质心不是完全等价表示；稀疏缺失填 0 也不证明物理信号不存在。
+
+`SpectraPanel` 自动检查项目完整 SBD，仅在缺失或用户选择更换时显示路径编辑器。`SpotSpectrum` 在选点后自动请求对应点的光谱，取消旧请求以避免快速切点混入旧数据。两个组件提供数值与 CSV；尚未实现从提取通道生成原生多离子热图。现有 PNG 热图叠加只采样图片 RGB。
+
+当前主要验证范围是 SCiLS Lab 12.01、Version 36 Peaks 样本，尚无完整 SCiLS 功能或导出等价性验证。解码细节、API、测试命令与已知峰见 [SBD 质谱读取](sbd-spectra-reader.md)。

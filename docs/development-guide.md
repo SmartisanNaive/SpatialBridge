@@ -1,6 +1,6 @@
 # SpatialBridge 开发规范与贡献指南
 
-[← 返回文档索引](README.md) | [返回 README](../../README.md) | [简要贡献指南](../../CONTRIBUTING.md)
+[← 返回文档索引](README.md) | [返回 README](../README.md) | [简要贡献指南](../CONTRIBUTING.md)
 
 为了确保 SpatialBridge 项目的代码质量、算法精度、跨平台兼容性与长期可维护性，所有参与项目开发的贡献者与维护者均需遵守本规范。
 
@@ -10,7 +10,7 @@
 
 ### 1.1 纯逻辑与框架解耦原则
 - **后端解耦**：
-  - 核心算法（`registration.py`、`lattice.py`、`heatmap.py`、`tiles.py`、`integration.py`）**严禁**直接依赖 FastAPI 的 `Request`、`Response` 或 `HTTPException`。
+  - 核心算法（`registration.py`、`lattice.py`、`heatmap.py`、`tiles.py`、`integration.py`、`spectra.py`）**严禁**直接依赖 FastAPI 的 `Request`、`Response` 或 `HTTPException`。
   - 算法模块必须接受标准 Python / NumPy / Path 类型输入，返回纯数据字典或数据类，确保可以独立在 CLI（`spatialbridge register`）或单元测试中无头调用。
 - **前端解耦**：
   - 核心流转与算法逻辑（如 `flow.ts`、`hash.ts`、`compress.ts`、`png-core.ts`、`sbd-package.ts`）**严禁**直接绑定 React Hook、Component 或浏览器 DOM API。
@@ -27,11 +27,11 @@
   - 后端图像密集计算必须走单线程排队队列（`processing_pool = ThreadPoolExecutor(max_workers=1)`），严禁在 API 请求线程中直接异步启动大图处理，防止多并发上传瞬间 OOM。
 
 ### 1.3 跨平台路径协议规范
-- 数据库 `spatialbridge.sqlite` 和报告 `report.json` 中，**禁止**存储带有宿主机绝对路径的文件引用；
-- 必须使用内置的相对协议格式：
-  - `data://<relative_path>`：相对于持久化数据目录的文件。
-  - `project://<relative_path>`：相对于具体项目子目录的文件。
-- 确保整个数据目录可以在 Linux、macOS 或不同云主机之间整盘无缝迁移。
+- 数据目录管理的上传来源与生成文件使用相对协议格式：
+  - `data://<relative_path>`：相对于持久化数据目录。
+  - `project://<relative_path>`：相对于具体项目目录。
+- 目录导入来源和 `spectra-source.json` 中关联的外部 SBD 可记录绝对路径；关联不复制文件。移动数据目录时需保留外部路径或重新关联，容器内需挂载对应来源。
+- 代码及测试不得硬编码个人来源路径，默认测试不得依赖本机真实数据。
 
 ---
 
@@ -51,10 +51,13 @@
   - `ProjectHome`：负责文件校验、上传进度交互与项目创建。
   - `Workbench`：负责双视口、卷帘对比、图层混合与标尺交互。
   - `CanvasViewer`：封装 OpenSeadragon 视口监听与批量 Canvas 渲染。
+  - `SpectraPanel`：自动检测项目完整 SBD，提供平均谱、按点查询、多目标离子数值和 CSV；只有源不可用或主动更换时显示路径编辑器。
+  - `SpotSpectrum`：选中映射网格点后自动读取对应 SBD spot ID 的完整质心谱，提供分页、强度排序和 CSV；切点时取消旧请求，避免显示过期结果。
+- **数值语义**：normalization 因子、PNG RGB 与原始离子强度必须区分；离子窗口按全局分箱筛选，不能悄悄改为最近分箱或精确质心筛选。当前没有原生多离子热图，扩展时不得把现有 PNG 图片叠加视为已完成数值渲染。
 - **代码分割**：大图瓦片引擎（OpenSeadragon）与分析工作台必须采用动态 `import()` 懒加载，确保首页首屏加载轻量迅速。
 
 ### 2.3 EditorConfig 统一设置
-项目根目录维护有 [.editorconfig](../../.editorconfig)，编辑器需遵循以下规则：
+项目根目录维护有 [.editorconfig](../.editorconfig)，编辑器需遵循以下规则：
 - 所有文件：`charset = utf-8`，`end_of_line = lf`，`insert_final_newline = true`，`trim_trailing_whitespace = true`。
 - Python：`indent_size = 4`。
 - TypeScript / JSON / YAML / Markdown：`indent_size = 2`。
@@ -67,32 +70,48 @@
 
 ### 3.1 门禁 1：后端 Pytest 单元测试
 ```bash
-uv run pytest -q
+.venv/bin/python -m pytest -q
 ```
 - **测试要求**：
-  - 当前测试套件包含 74 项单元测试，需全部通过。
-  - 测试用例**严禁依赖**本机的 `参考数据/` 或已存在的外部大文件。
-  - 测试所需的所有图像、SBD 数据结构必须利用 pytest 的 `tmp_path` fixture 在内存或临时目录中轻量合成（尺寸通常在 $100 \times 100$ 以内）。
+  - 常规套件使用临时目录中的合成图像与 SBD，不依赖本机 `参考数据/`；测试数量随功能变化，以运行输出为准。
+  - `tests/test_spectra.py` 覆盖压缩索引、精确质量参数尾部、末段偏移、闭区间、ppm/Da、sum/max、区域筛选、归一化、来源关联与接口错误。
+  - 真实 SBD 测试只有显式设置环境变量才运行；未设置时应跳过，不影响普通 CI。
+
+```bash
+SPATIALBRIDGE_TEST_SBD='/absolute/path/OD2-OD0.005-2608252148.sbd' \
+  .venv/bin/python -m pytest tests/test_spectra.py -q
+```
+
+该真实测试带有指定样本的已知峰断言，不是任意 SBD 的通用通过测试。峰值、抽样范围和 SCiLS 等价性边界见 [SBD 验证](sbd-spectra-reader.md#验证)。
 
 ### 3.2 门禁 2：前端纯逻辑与单元测试
 ```bash
-cd frontend
-npm test
+npm --prefix frontend test
 ```
 - **测试要求**：
-  - 基于 Node.js 原生测试运行器（`node --experimental-strip-types --test`）执行 34 项测试。
-  - 覆盖分片上传自适应压缩、SHA-256 跨平台回退、PNG 扫描行无损验证、SBD 包解析和指针防抖算法。
+  - 基于 Node.js 原生测试运行器（`node --experimental-strip-types --test`），以当前输出为准，不固定测试数量。
+  - 覆盖上传流转、自适应压缩、SHA-256 回退、PNG 扫描行无损验证、历史 SBD 包、指针手势、网格详情与国际化等纯逻辑。
+  - 纯逻辑测试不能代替浏览器验收。修改选点/光谱交互时，检查点 ID 一致性、快速切点取消请求、分页/排序、CSV、缺少完整源和更换失败后的状态。
 
 ### 3.3 门禁 3：前端类型检查与生产打包
 ```bash
-cd frontend
-npm run build
+npm --prefix frontend run build
 ```
 - **测试要求**：
   - 执行 `tsc -p tsconfig.json --noEmit` 进行全量类型检查，零警告、零报错。
   - 执行 `vite build` 验证打包产物无断链。
 
 ---
+
+### 3.4 本地一体化验收
+
+完成生产构建后，从项目根目录启动一个服务进程：
+
+```bash
+.venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
+```
+
+访问 `http://127.0.0.1:8000`，验证处理预览、配准图层、点位详情和光谱数值。新项目应保存完整 SBD，不经 `.sbdx` 自动替换。现有 PNG 热图图片配准和 SBD 离子提取分别验收；点位归一化因子不能作为原始离子强度验证依据。可选 Vite 开发方式见[部署文档](deployment.md#24-可选vite-开发服务)。
 
 ## 4. Git 提交与版本控制规范
 

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  采集前/采集后显微图与 MALDI 空间数据的自动配准与联动查看工具
+  采集前/采集后显微图与 MALDI 空间数据的自动配准、点位查询与质谱读取工具
 </p>
 
 <p align="center">
@@ -25,77 +25,30 @@
 
 ---
 
-SpatialBridge 读取 SCiLS SBD 文件中的逐点坐标和 normalization 值，结合 MALDI 热图与两张显微 PNG，建立 `SBD world → 板图像素 → 热图像素 → 显微 PNG 像素` 的坐标链，并在采集后图像上确认激光灼烧坑。来源文件只读，项目缓存和人工标记单独保存。
+SpatialBridge 将显微图中的激光采样位置与 SCiLS SBD 点位对应起来。配准后，点击显微图网格即可读取该点的原始质心光谱；也可查看文件保存的平均光谱，或提取多个 m/z 窗口的逐点强度。来源文件只读，项目缓存和人工标注单独保存。
 
 ![SpatialBridge 单细胞 MALDI 信号配准流程](docs/images/workflow.png)
 
 ## 功能
 
-- **自动配准**：板图与热图纹理匹配，加上 SBD `OriginalCoordinates` 的独立一致性检查。
-- **灼烧坑晶格检测**：从清晰区域拟合规则晶格，并用空间留出集选择平滑模型。
-- **大图浏览**：基于 OpenSeadragon 的瓦片浏览，支持采集前、采集后和前后卷帘对比，十万级 spot 方框流畅绘制。
-- **点位查询与标注**：点击任意 spot 查看 SBD 信息和全部 normalization 值，人工赋值点可导出 CSV。
-- **热图叠加**：自动识别热图旋转和镜像，并按 SBD 点位显示颜色。
-- **大文件上传**：浏览器先从 SBD 提取坐标、数值和板图，仅上传精简包；PNG 在本机按需无损优化，已充分压缩的图片直接复用；16 MiB 分片、SHA-256 校验、按需 gzip 压缩、断点续传。
-- **单容器部署**：Docker Compose 一键部署到 Linux 服务器，数据持久化在宿主机。
+- **自动配准**：用两个标志物内的八个方孔角点拟合采集前/后显微图单应变换；结合 SBD 板图、热图纹理与 `OriginalCoordinates` 检查跨模态坐标链。
+- **灼烧坑晶格检测**：从清晰区域恢复规则晶格，用空间留出集比较仿射、二阶和三阶模型，并记录分区误差与有效映射范围。
+- **大图浏览与点位查询**：OpenSeadragon 瓦片浏览、采集前/后与卷帘对比、网格点选择；点位详情展示坐标、raster、归一化因子和自动读取的完整单点光谱，支持翻页、强度排序与 CSV 下载。
+- **SBD 质谱读取**：「光谱数据」自动使用项目的完整 SBD，支持已保存的平均光谱、按点 ID 查询、1–32 个目标的 ppm/Da 窗口提取、sum/max 聚合、保存的区域及归一化因子选择。结果提供数值预览与完整 CSV。
+- **PNG 热图叠加与人工标注**：配准已有热图图片、识别旋转和镜像，并将其颜色映射到点位；人工赋值点可导出 CSV。此图片叠加与 SBD 数值提取是不同功能。
+- **完整文件上传与项目管理**：完整 SBD 通过 16 MiB 分片、SHA-256 校验、按需 gzip 与断点续传保留；PNG 可在本机无损优化。支持处理预览、历史项目和删除项目记录。
+- **一体化运行**：一个应用进程在 8000 端口提供前端、API 与瓦片，也可通过 Docker Compose 部署。
 
 ![工作台前后卷帘对比](docs/images/workbench-swipe.png)
 
-## 技术架构与算法原理（CV 管线）
+## 典型流程
 
-针对超宽幅显微拼接图（典型尺寸 $74,000 \times 8,500$ 像素，约 6.3 亿像素）、高空间分辨率激光灼烧痕迹以及跨模态成像差异，SpatialBridge 构建了四阶段高精度计算机视觉配准管线：
+1. 选择采集前 PNG、采集后 PNG，以及可选的完整 SBD 和已有热图 PNG。板图通常直接使用 SBD 内嵌图像，无需另传。
+2. 等待配准和瓦片生成，在工作台检查前后叠加与晶格诊断。双 PNG 项目可独立浏览；SBD 查询需要相应数据，网格联动需要有效空间映射。
+3. 在映射范围放大并点击单个网格点，右侧自动显示该 SBD 点位的完整光谱。缩略视图下第一次点击会先放大。
+4. 打开「光谱数据」读取平均光谱或提取多个离子窗口；下载 CSV 后继续分析。当前尚未将提取通道直接绘制为多离子热图或叠加到显微图。
 
-```mermaid
-flowchart TD
-    subgraph M1["1. 标志物亚像素单应配准"]
-        A["采集前/采集后显微超宽图 (73k×8k px)"] --> B["多阈值双极性轮廓树分析"]
-        B --> C["提取 2 个圆形标志物内的矩形方孔 (8 个角点)"]
-        C --> D["相位枚举 + 求解单应矩阵 H"]
-        D --> E["双图单应配准 (重投影 RMSE < 1e-12 px)"]
-    end
-
-    subgraph M2["2. 跨模态配准与闭环坐标链"]
-        F["SBD 内嵌光学板图"] <-->|"边缘/纹理匹配 + 旋转镜像识别"| G["MALDI 离子热图 (可选 OCR)"]
-        E -.->|"空间矩阵闭环"| H["SBD World 与 OriginalCoordinates 独立一致性校验 (p95 < 1 px)"]
-    end
-
-    subgraph M3["3. 灼烧坑检测与光学晶格拟合 (SpaceM 思想演进)"]
-        I["局部高信噪比清晰区"] --> J["FLANN 近轴拓扑连通 (容忍缺失节点)"]
-        J --> K["稀疏轮廓离散互相关 (确定原点与镜像)"]
-        K --> L["空间留出集多项式曲面评估 (Affine / Degree-2 / Degree-3)"]
-        L --> M["全局光学晶格模型 (Degree-2 消除玻片微翘曲)"]
-    end
-
-    subgraph M4["4. 亿级像素多尺度瓦片流式引擎"]
-        N["单通道 L 模式分层解耦"] --> O["多线程 Lanczos 下采样瓦片切片"]
-        O --> P["视口反向透视采样 + 批量 Canvas 路径 (10万点 60fps)"]
-    end
-```
-
-### 核心 CV 算法优势
-
-1. **8 点方孔单应配准（突破传统 2 标记圆心相似变换限制）**
-   - **痛点**：在 $74,000 \times 8,500$ 像素的超长条玻片扫描中，长轴两端存在由于机械进给与光学形变导致的微小比例尺漂移、剪切角与梯形失真。传统的 2 标记圆心刚体/相似变换（只有 4 个自由度）无法拟合非刚性畸变。
-   - **方案**：系统利用形态学与轮廓层次树分析（`RETR_TREE`），精确定位两个标志物内部的矩形空腔，提取全部 **8 个特征角点**。通过枚举 4 种循环相位及翻转排列，拟合 8 自由度单应矩阵 $H \in \mathbb{R}^{3 \times 3}$，将重投影 RMSE 压制至机器浮点精度（$< 10^{-12}\text{ px}$），实现亚像素级完全对齐。
-
-   ![8 点方孔单应配准架构](docs/images/homography-registration.png)
-
-2. **激光灼烧坑检测与光学晶格多项式拟合（借鉴并进阶 SpaceM 拓扑思想）**
-   - **痛点**：生物组织薄厚不一且存在背景异物，直接进行全幅目标检测极易在低对比度区域漏检或在杂质区产生伪阳性。
-   - **方案**：借鉴 SpaceM“从高信噪比区域先恢复规则晶格”的思路，首先在高对比度清晰区检测高斯响应峰；利用 FLANN 构建近轴图拓扑连接（自动容忍 1~2 个断点）；利用 SBD 稀疏点阵轮廓进行离散互相关，锁定空间原点与镜像；最后建立空间分块留出集（Spatial Hold-out Set），对比评估仿射、二阶和三阶多项式曲面模型，自适应选择 `sbd-optical-lattice-v2-degree2`（$[1, x, y, x^2, xy, y^2]$），在精准吸收长玻片非线性翘曲的同时彻底杜绝过拟合。
-
-   ![激光灼烧坑 FLANN 拓扑重构与多项式曲面拟合](docs/images/lattice-workflow.png)
-
-3. **双向闭环多模态坐标链验证**
-   - 建立完整连通的解析坐标变换链：
-     $$\text{SBD World} \xrightarrow{\text{World2Px}} \text{板图像素} \xrightarrow{\text{纹理配准}} \text{热图像素} \xrightarrow{H} \text{采集后显微像素} \xrightarrow{H^{-1}} \text{采集前显微像素}$$
-   - 利用 SBD 内部物理网格 `OriginalCoordinates` 进行独立的几何反向投影与闭环一致性检验，强制执行 $p95 < 1\text{ px}$ 门禁，确保单细胞尺度的点位映射严格保真。
-
-   ![多模态闭环坐标链与一致性验证门禁](docs/images/coordinate-chain.png)
-
-4. **单通道解耦的亿级像素流式金字塔引擎**
-   - 针对超大图内存膨胀问题，切片管道维持原生的单通道灰度（`L` 模式），避免单张图在内存中膨胀为数 GB 的 RGBA 缓冲区；
-   - 采用多线程 Lanczos 下采样构建 OpenSeadragon 规范的多分辨率瓦片金字塔；在线交互时基于视口四边形进行反向单应透视采样，结合批量 Canvas 路径绘制，实现 10 万+ spot 方框在前后卷帘视图下的 60fps 平滑缩放。
+项目已有完整 SBD 时，文件路径编辑器默认隐藏。旧精简包或源文件不可用时，可关联运行后端的机器可访问的完整 SBD；也可主动点击「更换数据文件」。关联不会复制文件，需保持其路径可用。
 
 ## 快速开始
 
@@ -107,35 +60,38 @@ flowchart TD
 
 ### 本地运行
 
-```bash
-# 后端（默认 http://127.0.0.1:8000）
-uv sync --extra tiles --extra dev
-uv run spatialbridge serve --data-dir ./workspace-data
+从项目根目录执行：
 
-# 前端（另开一个终端，默认 http://localhost:5173）
-cd frontend
-npm install
-npm run dev
+```bash
+uv sync --extra tiles --extra dev
+npm --prefix frontend install
+npm --prefix frontend run build
+.venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-打开 `http://localhost:5173`，在项目首页选择采集前 PNG、采集后 PNG，以及可选的 SBD 和热图。板图不需要上传，SBD 内嵌了 SCiLS 配准用的板图及坐标矩阵。
+打开 `http://127.0.0.1:8000`。前端与 API 由同一个进程提供；修改前端后重新构建并重启服务。需要热更新的开发者可选用独立 Vite 服务，见[开发与部署说明](docs/deployment.md#24-可选vite-开发服务)。
 
-如果项目根目录下有 `参考数据/` 示例目录，可以直接点击“载入内置示例”体验完整流程。示例数据不随仓库发布。
+如果项目根目录下有 `参考数据/` 示例目录，可点击「载入内置示例」体验完整流程。示例数据不随仓库发布。
 
 > [!NOTE]
-> uv 创建的 `.venv` 记录了绝对路径。移动或重命名项目目录后，删除 `.venv` 并重新执行 `uv sync --extra tiles --extra dev`；`frontend/node_modules` 同理用 `npm install` 重建。
+> uv 创建的 `.venv` 记录了绝对路径。移动或重命名项目目录后，删除 `.venv` 并重新执行 `uv sync --extra tiles --extra dev`；`frontend/node_modules` 同理用 `npm --prefix frontend install` 重建。
 
-### 命令行
+### 命令行与测试
 
 ```bash
-# 启动 Web 服务
-uv run spatialbridge serve --data-dir ./workspace-data [--host 127.0.0.1] [--port 8000] [--frontend-dir frontend/dist]
+# 查看服务参数：--data-dir、--frontend-dir、--host、--port
+.venv/bin/spatialbridge serve --help
 
-# 对一个来源目录执行配准并输出报告
-uv run spatialbridge register --source-dir ./参考数据 --output-dir ./workspace-data/manual-check
+# 对来源目录执行配准并输出报告
+.venv/bin/spatialbridge register --source-dir ./参考数据 --output-dir ./workspace-data/manual-check
+
+# 常规检查；真实 SBD 测试默认跳过
+.venv/bin/python -m pytest -q
+npm --prefix frontend test
+npm --prefix frontend run build
 ```
 
-数据库、上传分片、报告和缓存都写在 `--data-dir` 下，不会写入来源目录。
+数据库、上传分片、报告和缓存写在 `--data-dir` 下。目录导入和本地关联仍依赖外部来源路径；迁移时需同时保留或重新关联来源文件。
 
 ### 服务器部署
 
@@ -145,47 +101,49 @@ sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
 sudo docker compose up -d --build
 ```
 
-配置项、更新、备份恢复和使用边界见 [部署文档](docs/deployment.md)。
+配置项、完整 SBD 容量规划、更新和备份恢复见[部署文档](docs/deployment.md)。
 
 ## 文档
 
-完整文档导航与技术体系请查阅 [docs/README.md](docs/README.md)。
+完整导航见 [docs/README.md](docs/README.md)。
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/technical-architecture.md](docs/technical-architecture.md) | 计算机视觉核心管线深度解析：8 点方孔单应配准数学推导、FLANN 晶格重构、多项式曲面留出集拟合、闭环多模态坐标链与 WASM 轻量提取 |
-| [docs/deployment.md](docs/deployment.md) | 部署与运维全指南：本地原生开发部署、Linux Docker Compose 生产部署、macOS Apple Container 运行、容量规划、性能规格、Nginx TLS 与灾备恢复 |
-| [docs/algorithm.md](docs/algorithm.md) | 配准方法与输出规范：坐标系与矩阵方向约定（$xy$/$yx$）、输出文件数据模型、工作台交互逻辑与 HTTP REST API |
-| [docs/development-guide.md](docs/development-guide.md) | 开发规范与质量门禁：前后端分层解耦原则、内存防护机制、代码风格、三道质量测试门禁与 Conventional Commits 提交规范 |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 开发者快速上手指引与 Pull Request 流程 |
+| [SBD 质谱读取](docs/sbd-spectra-reader.md) | 使用方法、质量窗口语义、独立解码器、API 与已知样本验证 |
+| [技术架构](docs/technical-architecture.md) | CV 配准、晶格模型、瓦片、上传与按需质谱读取的数据流 |
+| [配准方法与输出](docs/algorithm.md) | 坐标约定、输出文件、工作台交互与 API |
+| [部署与运维](docs/deployment.md) | 本地单进程运行、容器、容量规划、备份与验收 |
+| [开发规范](docs/development-guide.md) | 模块分工、测试、内存与来源文件约束 |
+| [贡献指南](CONTRIBUTING.md) | 贡献流程 |
 
 ## 项目结构
 
 ```text
 .
-├── backend/spatialbridge/   FastAPI 后端：配准、晶格、热图、瓦片、存储、CLI
-├── frontend/                React + Vite + OpenSeadragon 前端
-│   ├── src/                 页面组件与纯逻辑模块
-│   └── tests/               前端单元测试（node:test）
-├── tests/                   后端 pytest
-├── docs/                    文档与配图
-├── Dockerfile.api           前后端一体化镜像
-├── compose.yaml             Docker Compose 服务定义
-└── .env.example             部署配置模板
+├── backend/spatialbridge/   FastAPI：配准、晶格、热图、质谱、瓦片、存储、CLI
+├── frontend/               React + Vite + OpenSeadragon 前端与 node:test 测试
+├── tests/                  后端 pytest
+├── docs/                   文档与配图
+├── Dockerfile.api          前后端一体化镜像
+├── compose.yaml            Docker Compose 服务定义
+└── .env.example            部署配置模板
 ```
 
-## 局限
+## 数值含义与局限
 
-- 热图颜色是渲染图片的近似采样，不是原始 m/z 离子强度。
-- 板图纹理匹配不能单独证明热图与项目来自同一次采集，仍需核对样本来源。
-- 服务端部署为共享模式，没有账号、权限或用户数据隔离，不内置 TLS。
-- 容器镜像已在 macOS Apple Container（Linux/ARM64）通过构建、真实双 PNG 处理和重建持久化验证；真实 Linux 服务器仍待验收，见 [验证记录与部署验收清单](docs/deployment.md#本地容器验证记录)。
+- 单点光谱保留更精确的质心 m/z；离子窗口按**全局质量轴分箱中心**筛选闭区间，不回退到最近质量点。窄窗口结果可能与按单点精确质心筛选不同。
+- 稀疏项与未命中窗口填 0，不能据此断言物理信号不存在。保存的归一化采用 `raw / Values[spot_id]`，非正因子输出 0；未与 SCiLS 导出逐点确认等价。
+- 点位详情中的 normalization 数值是因子，PNG 热图 RGB 是图片颜色；两者都不是该点的原始离子强度。
+- 当前读取器主要用 SCiLS Lab 12.01、Version 36 的 Peaks 质心 SBD 验证。不支持完整 SCiLS 功能或所有版本/编码，非 Peaks 类型明确拒绝。当前提供数值与 CSV，尚无原生多离子热图渲染。
+- 配准误差与晶格模型需结合项目报告和局部图像复核；标志物残差不代表全图或单细胞尺度的独立精度。板图纹理匹配也不能单独证明同次采集。
+- 服务端为共享模式，没有账号、权限、用户数据隔离或内置 TLS。容器的既有验证与真实 Linux 部署验收范围见[部署文档](docs/deployment.md#本地容器验证记录已通过)。
 
 ## 致谢
 
 - [SpaceM](https://github.com/alexandrovteam/SpaceM)：灼烧坑晶格检测思路
 - [napari-imsmicrolink](https://github.com/nhpatterson/napari-imsmicrolink)：IMS 坐标矩阵方向约定
 - [OpenSeadragon](https://openseadragon.github.io/)：大图瓦片浏览
+- imzy SCiLS reader：SBD 格式结构参考；运行时不依赖 imzy 或 Bruker SDK
 
 ## 许可证
 

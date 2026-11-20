@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Automatic registration and linked viewing of pre/post-acquisition microscopy and MALDI spatial data
+  Automatic registration, spot lookup and spectrum reading for pre/post-acquisition microscopy and MALDI spatial data
 </p>
 
 <p align="center">
@@ -25,77 +25,30 @@
 
 ---
 
-SpatialBridge reads per-spot coordinates and normalization values from a SCiLS SBD file. Together with a MALDI heat map and two microscopy PNGs, it builds the coordinate chain `SBD world → slide image pixel → heat map pixel → microscopy PNG pixel` and confirms laser burn pits on the post-acquisition image. Source files are opened read-only. Project caches and manual annotations are stored separately.
+SpatialBridge links laser sampling positions in microscopy images to SCiLS SBD spots. After registration, click a mapped grid point to read its raw centroid spectrum, inspect saved mean spectra, or extract per-spot intensities for multiple m/z windows. Source files are read-only; project caches and manual annotations are stored separately.
 
 ![SpatialBridge single-cell MALDI signal registration workflow](docs/images/workflow.png)
 
 ## Features
 
-- **Automatic registration**: texture matching between the slide image and heat map, plus an independent consistency check against SBD `OriginalCoordinates`.
-- **Burn-pit lattice detection**: fits a regular lattice from clear regions and selects a smoothing model with a spatial hold-out set.
-- **Large-image viewer**: OpenSeadragon tiles with pre, post and swipe comparison views; draws 100k+ spot footprints smoothly.
-- **Spot lookup and annotation**: click any spot to see its SBD record and all normalization values; export manual points as CSV.
-- **Heat map overlay**: detects heat map rotation and mirroring automatically, then colors each SBD spot.
-- **Large uploads**: the browser extracts SBD coordinates, normalization values and optical images before uploading a compact package; PNGs are losslessly optimized locally when useful, with already-compressed images reused; 16 MiB chunks, SHA-256 verification, adaptive gzip, resumable transfers.
-- **Single-container deployment**: Docker Compose on a Linux server, with data persisted on the host.
+- **Automatic registration**: fits a pre/post microscopy homography from eight square-hole corners inside two fiducials; uses the SBD slide image, heat map texture and `OriginalCoordinates` to check the cross-modal coordinate chain.
+- **Burn-pit lattice detection**: recovers a regular lattice from clear regions, compares affine, degree-2 and degree-3 models using a spatial hold-out set, and records regional errors and the valid mapping domain.
+- **Large-image viewing and spot lookup**: OpenSeadragon tiles, pre/post and swipe views, and grid-point selection. Spot details include coordinates, raster, normalization factors and an automatically loaded full spot spectrum with pagination, intensity sorting and CSV download.
+- **SBD spectrum reading**: the spectral data panel automatically uses the project's full SBD. It reads saved mean spectra and spots by ID, and extracts 1–32 targets with ppm/Da windows, sum/max aggregation, saved regions and normalization factors. Results include numeric previews and complete CSV exports.
+- **PNG heat map overlay and annotation**: registers existing heat map images, detects rotation/mirroring, and maps image colors onto spots. Manual points can be exported as CSV. This image overlay is a separate feature from SBD numeric extraction.
+- **Full-file uploads and project management**: preserves the full SBD through 16 MiB chunks, SHA-256 verification, adaptive gzip and resumable transfers; PNGs can be losslessly optimized locally. Includes processing previews, project history and project-record deletion.
+- **Integrated serving**: one application process serves the frontend, API and tiles on port 8000; Docker Compose deployment is also available.
 
 ![Workbench swipe comparison](docs/images/workbench-swipe.png)
 
-## Architecture & CV Pipeline
+## Typical workflow
 
-To address the challenges of gigapixel microscopy scans (typically $74,000 \times 8,500$ pixels, $\sim 630\text{ Mpx}$), subtle laser ablation marks, and cross-modal imaging discrepancies, SpatialBridge incorporates a four-stage, high-precision computer vision pipeline:
+1. Select the pre-acquisition PNG, post-acquisition PNG, and optionally a full SBD and existing heat map PNG. The slide image normally comes from the SBD and needs no separate upload.
+2. Wait for registration and tile generation, then inspect pre/post alignment and lattice diagnostics. Two-PNG projects support image viewing independently; SBD queries require the corresponding data, and linked grid selection requires a valid spatial mapping.
+3. Zoom into the mapped area and click an individual grid point. Its full SBD spectrum loads automatically in the inspector. At overview scale, the first click zooms in.
+4. Open the spectral data panel to read mean spectra or extract multiple ion windows; download CSV for further analysis. Extracted channels are not yet rendered directly as multi-ion heat maps or microscopy overlays.
 
-```mermaid
-flowchart TD
-    subgraph M1["1. Subpixel Marker & Homography Registration"]
-        A["Pre/Post Microscopy Scans (73k×8k px)"] --> B["Multi-Threshold Bipolar Contour Tree"]
-        B --> C["Detect 2 Circle-Square Markers (8 Hole Corners)"]
-        C --> D["Phase Enumeration + Homography Fit H"]
-        D --> E["Pre/Post Homography (Reprojection RMSE < 1e-12 px)"]
-    end
-
-    subgraph M2["2. Cross-Modal Registration & Closed-Loop Chain"]
-        F["SBD Embedded Slide Image"] <-->|"Texture Match + Orientation Detection"| G["MALDI Heat Map (Optional OCR)"]
-        E -.->|"Spatial Matrix Loop"| H["Independent Consistency Check via OriginalCoordinates (p95 < 1 px)"]
-    end
-
-    subgraph M3["3. Burn-Pit Detection & Optical Lattice Fitting"]
-        I["Local Clear Regions"] --> J["FLANN Near-Axis Lattice Topology"]
-        J --> K["Sparse Outline Cross-Correlation (Origin & Mirroring)"]
-        K --> L["Spatial Hold-Out Polynomial Model Selection (Affine / Deg-2 / Deg-3)"]
-        L --> M["Global Optical Lattice Model (Degree-2 Corrects Slide Warping)"]
-    end
-
-    subgraph M4["4. Gigapixel Multi-Scale Streaming Engine"]
-        N["Single-Channel L Mode Decoupling"] --> O["Multi-Threaded Lanczos Tile Pyramid"]
-        O --> P["Inverse Homography Viewport Sampling + Batch Canvas Paths (100k+ Spots at 60fps)"]
-    end
-```
-
-### Key CV Pipeline Strengths
-
-1. **8-Corner Hole Homography (Overcoming 2-Centroid Similarity Limits)**
-   - **Challenge**: Over ultra-wide slide scans ($74,000 \times 8,500$ px), mechanical stage feed errors and optical distortions introduce subtle scale drift, shear, and keystone skew across the long axis. Standard 2-marker centroid similarity transforms (4 degrees of freedom) cannot capture these non-rigid deformations.
-   - **Solution**: Using topological contour tree analysis (`RETR_TREE`), SpatialBridge detects the square inner cavity within both circular markers, extracting all **8 hole corners**. By enumerating 4 cyclic phases and reflections, it fits an 8-DOF homography matrix $H \in \mathbb{R}^{3 \times 3}$, pushing the reprojection RMSE down to floating-point machine precision ($< 10^{-12}\text{ px}$) for exact subpixel alignment.
-
-   ![Subpixel 8-Corner Homography Registration](docs/images/homography-registration.png)
-
-2. **Laser Burn-Pit Detection & Polynomial Optical Lattice (Evolving SpaceM Concepts)**
-   - **Challenge**: Non-uniform tissue thickness and low local contrast cause standard direct object detectors to suffer high false negatives or noise-induced false positives.
-   - **Solution**: Inspired by SpaceM's principle of recovering regular lattice topology from high-SNR regions first, the system identifies local Gaussian response peaks and links near-axis neighbours via FLANN (tolerating 1–2 missing nodes). It aligns integer origin and mirror orientation against the SBD's sparse footprint outline via discrete cross-correlation. Finally, it uses a **spatial hold-out set** to benchmark affine, degree-2, and degree-3 polynomial surface models, adaptively selecting `sbd-optical-lattice-v2-degree2` ($[1, x, y, x^2, xy, y^2]$) to correct physical slide warping while strictly avoiding overfitting.
-
-   ![Burn-Pit Optical Lattice Recovery & Surface Manifold Fitting](docs/images/lattice-workflow.png)
-
-3. **Closed-Loop Multi-Modal Coordinate Chain**
-   - Establishes a seamless, continuous coordinate mapping:
-     $$\text{SBD World} \xrightarrow{\text{World2Px}} \text{Slide Pixel} \xrightarrow{\text{Texture Match}} \text{Heat Map Pixel} \xrightarrow{H} \text{Post-Acquisition Pixel} \xrightarrow{H^{-1}} \text{Pre-Acquisition Pixel}$$
-   - Uses SBD `OriginalCoordinates` for independent geometric loop closure, enforcing a strict $p95 < 1\text{ px}$ validation gate to guarantee spot-level fidelity.
-
-   ![Multi-Modal Closed-Loop Coordinate Chain & Transformation Pipeline](docs/images/coordinate-chain.png)
-
-4. **Single-Channel Decoupled Gigapixel Tile Engine**
-   - Keeps single-channel grayscale (`L` mode) throughout pyramid construction to avoid expanding a 630 Mpx image into multi-gigabyte RGBA memory buffers.
-   - Generates OpenSeadragon-compliant multi-resolution pyramids via multi-threaded Lanczos downsampling. At runtime, it performs inverse projective viewport sampling and batch Canvas path rendering, enabling smooth 60fps swipe comparison across 100k+ spot footprints.
+When a full SBD is available, the file-path editor stays hidden. Legacy compact-package projects or missing sources can be linked to a full SBD accessible to the backend machine; use “Change data file” to change a working source. Linking does not copy the file, so its path must remain accessible.
 
 ## Quick start
 
@@ -103,39 +56,42 @@ flowchart TD
 
 - Python 3.11+ and [uv](https://docs.astral.sh/uv/)
 - Node.js 22+ and npm
-- Optional: [libvips](https://www.libvips.org/) (faster large-image processing with `--extra tiles`) and [Tesseract](https://github.com/tesseract-ocr/tesseract) (reads the m/z label on heat maps)
+- Optional: [libvips](https://www.libvips.org/) (faster large-image processing with `--extra tiles`) and [Tesseract](https://github.com/tesseract-ocr/tesseract) (reads m/z labels on heat maps)
 
 ### Run locally
 
-```bash
-# Backend (http://127.0.0.1:8000 by default)
-uv sync --extra tiles --extra dev
-uv run spatialbridge serve --data-dir ./workspace-data
+Run from the repository root:
 
-# Frontend, in a second terminal (http://localhost:5173 by default)
-cd frontend
-npm install
-npm run dev
+```bash
+uv sync --extra tiles --extra dev
+npm --prefix frontend install
+npm --prefix frontend run build
+.venv/bin/spatialbridge serve --data-dir ./workspace-data --frontend-dir frontend/dist --port 8000
 ```
 
-Open `http://localhost:5173`. On the project home page, select the pre-acquisition PNG, the post-acquisition PNG, and optionally the SBD file and a heat map. You don't need to upload the slide image, because the SBD embeds the slide image and coordinate matrices that SCiLS used for registration.
+Open `http://127.0.0.1:8000`. The same process serves the frontend and API; rebuild the frontend and restart the service after frontend changes. Developers needing hot reload can optionally run a separate Vite service; see the [development/deployment instructions](docs/deployment.md#24-可选vite-开发服务) (Chinese).
 
-If a `参考数据/` sample directory exists in the project root, click "载入内置示例" (load built-in demo) to try the full workflow. Sample data is not distributed with the repository.
+If a `参考数据/` sample directory exists in the repository root, click “载入内置示例” (load built-in demo) to try the full workflow. Sample data is not distributed with the repository.
 
 > [!NOTE]
-> The `.venv` created by uv records absolute paths. After moving or renaming the project directory, delete `.venv` and run `uv sync --extra tiles --extra dev` again. Rebuild `frontend/node_modules` with `npm install` the same way.
+> uv's `.venv` records absolute paths. After moving or renaming the project directory, delete `.venv` and run `uv sync --extra tiles --extra dev` again. Rebuild `frontend/node_modules` with `npm --prefix frontend install` as needed.
 
-### Command line
+### Command line and tests
 
 ```bash
-# Start the web service
-uv run spatialbridge serve --data-dir ./workspace-data [--host 127.0.0.1] [--port 8000] [--frontend-dir frontend/dist]
+# Service options: --data-dir, --frontend-dir, --host, --port
+.venv/bin/spatialbridge serve --help
 
 # Register a source directory and write a report
-uv run spatialbridge register --source-dir ./参考数据 --output-dir ./workspace-data/manual-check
+.venv/bin/spatialbridge register --source-dir ./参考数据 --output-dir ./workspace-data/manual-check
+
+# Routine checks; real-SBD testing is skipped by default
+.venv/bin/python -m pytest -q
+npm --prefix frontend test
+npm --prefix frontend run build
 ```
 
-The database, upload chunks, reports and caches all live under `--data-dir`. Nothing is written into the source directory.
+The database, upload chunks, reports and caches live under `--data-dir`. Directory imports and locally linked SBDs still depend on external source paths; preserve or relink those files when migrating.
 
 ### Server deployment
 
@@ -145,47 +101,49 @@ sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
 sudo docker compose up -d --build
 ```
 
-See the [deployment guide](docs/deployment.md) (Chinese) for configuration, updates, backup and restore, and usage limits.
+See the [deployment guide](docs/deployment.md) (Chinese) for configuration, full-SBD storage planning, updates and backup/restore.
 
 ## Documentation
 
-The full documentation index is available at [docs/README.md](docs/README.md) (in Chinese).
+See [docs/README.md](docs/README.md) for the full index. Detailed guides are in Chinese.
 
 | Document | Contents |
 | --- | --- |
-| [docs/technical-architecture.md](docs/technical-architecture.md) | CV pipeline deep-dive, 8-corner homography derivation, FLANN lattice fitting, closed-loop coordinate chain, and WASM extraction |
-| [docs/deployment.md](docs/deployment.md) | Comprehensive deployment & operations guide: development setup, Linux Docker Compose, macOS Apple Container, capacity planning, Nginx TLS, and disaster recovery |
-| [docs/algorithm.md](docs/algorithm.md) | Coordinate conventions ($xy$/$yx$), output specifications, workbench interaction logic, and HTTP REST API |
-| [docs/development-guide.md](docs/development-guide.md) | Architecture decoupling principles, memory protection guidelines, coding standards, 3-tier test gates, and Conventional Commits |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Quick contributor onboarding guide and Pull Request workflow |
+| [SBD spectrum reading](docs/sbd-spectra-reader.md) | Usage, window semantics, independent decoder, API and known-sample validation |
+| [Technical architecture](docs/technical-architecture.md) | CV registration, lattice models, tiles, uploads and on-demand spectrum reading |
+| [Registration and outputs](docs/algorithm.md) | Coordinate conventions, output files, workbench interactions and API |
+| [Deployment and operations](docs/deployment.md) | Local single-process serving, containers, capacity planning, backup and acceptance |
+| [Development guide](docs/development-guide.md) | Module responsibilities, testing, memory and source-file constraints |
+| [Contributing](CONTRIBUTING.md) | Contribution workflow |
 
 ## Project layout
 
 ```text
 .
-├── backend/spatialbridge/   FastAPI backend: registration, lattice, heat map, tiles, storage, CLI
-├── frontend/                React + Vite + OpenSeadragon frontend
-│   ├── src/                 Page components and pure logic modules
-│   └── tests/               Frontend unit tests (node:test)
-├── tests/                   Backend pytest suite
-├── docs/                    Documentation and images
-├── Dockerfile.api           Combined frontend + backend image
-├── compose.yaml             Docker Compose service
-└── .env.example             Deployment configuration template
+├── backend/spatialbridge/   FastAPI: registration, lattice, heat map, spectra, tiles, storage, CLI
+├── frontend/               React + Vite + OpenSeadragon frontend and node:test tests
+├── tests/                  Backend pytest suite
+├── docs/                   Documentation and images
+├── Dockerfile.api          Combined frontend + backend image
+├── compose.yaml            Docker Compose service
+└── .env.example            Deployment configuration template
 ```
 
-## Limitations
+## Value semantics and limitations
 
-- Heat map colors are sampled from the rendered image. They approximate the signal and are not raw m/z ion intensities.
-- A slide-texture match alone does not prove that a heat map comes from the same acquisition. Check the sample provenance.
-- The server runs in shared mode, with no accounts, permissions, per-user data isolation or built-in TLS.
-- The container image has passed build, real two-PNG processing and persistence checks across container recreation on macOS Apple Container (Linux/ARM64). Acceptance on a real Linux server is still pending; see the [validation record and acceptance checklist](docs/deployment.md#本地容器验证记录).
+- Spot spectra retain more precise centroid m/z values; ion windows select **global mass-axis bin centers** within inclusive bounds, without choosing a nearest bin. Narrow windows can differ from filtering precise spot centroids.
+- Sparse entries and windows without matching bins are filled with zero, which does not establish physical absence. Saved normalization uses `raw / Values[spot_id]`; nonpositive factors produce zero. Equivalence to SCiLS exports has not been verified spot by spot.
+- Normalization values in spot details are factors, and PNG heat map RGB values are image colors. Neither is that spot's raw ion intensity.
+- The reader has mainly been verified against a SCiLS Lab 12.01, Version 36 Peaks centroid SBD. It does not provide full SCiLS parity or support every version/encoding; non-Peaks types are explicitly rejected. Numeric results and CSV are available; native multi-ion heat map rendering is not yet implemented.
+- Review project reports and local image alignment when assessing registration. Fiducial residuals do not establish independent whole-image or single-cell accuracy. A slide-texture match alone cannot prove common acquisition provenance.
+- The server runs in shared mode, with no accounts, permissions, per-user isolation or built-in TLS. See the [deployment guide](docs/deployment.md#本地容器验证记录已通过) for the scope of existing container checks and pending Linux deployment acceptance.
 
 ## Acknowledgements
 
 - [SpaceM](https://github.com/alexandrovteam/SpaceM): approach to burn-pit lattice detection
 - [napari-imsmicrolink](https://github.com/nhpatterson/napari-imsmicrolink): IMS coordinate matrix orientation conventions
 - [OpenSeadragon](https://openseadragon.github.io/): large-image tile viewer
+- imzy SCiLS reader: SBD format reference; no runtime dependency on imzy or the Bruker SDK
 
 ## License
 

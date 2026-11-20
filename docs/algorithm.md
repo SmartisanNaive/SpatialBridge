@@ -29,22 +29,13 @@ SpatialBridge 读取 SBD 的逐点坐标和 normalization 值，建立 `SBD worl
 - 热图颜色是渲染图片的近似采样，不是原始 m/z 离子强度；底色、边框或缺失区域不提供数值。
 - 板图纹理匹配不能单独证明热图与项目来自同一次采集，仍需核对样本来源。
 
-## 浏览器本地提取 SBD
+## 完整 SBD 上传与按需读取
 
-网页选择 SBD 后，在专用 Web Worker 中用固定版本 `h5wasm 0.10.3` 和 WORKERFS 挂载本地 `File`。读取通过 `Blob.slice` 按文件偏移进行，不将完整输入复制到 WASM 内存；每次底层读取上限为 4 MiB。仅遍历以下子树：
+当前网页直接上传完整 `.sbd`，不会自动转换为坐标精简包。原文件通过 16 MiB 分片、SHA-256 校验、按需 gzip 与断点续传流程保存，配准阶段读取坐标、normalization 和板图；光谱阶段由 `spectra.py` 按需读取选定压缩块，不将整个文件载入内存。
 
-- `Registrations/0`：坐标、OriginalCoordinates、spot 尺寸和 raster 变换。
-- `MeasurementRasterIndices`：逐点 raster 编号。
-- `SpectraGroup/Normalizations`：normalization 数组及名称等属性。
-- `OpticalImages`：内嵌板图和配准信息。
+历史 `.sbdx` 包及其还原的精简 HDF5 仍保留兼容支持。它们只有坐标、raster、归一化因子和光学图像，没有完整光谱。旧项目可关联后端机器可访问的完整 SBD，验证点数并在旧源可用时比对坐标、raster 和 UUID，再持久化关联。关联文件不会复制进数据目录，迁移或备份时需另行处理。
 
-输出为版本化 `.sbdx` 精简包，包含 `SPBSBD01` 魔数、4 字节小端 JSON 目录长度、UTF-8 目录和连续的数值数组原始字节。目录记录来源文件名和大小、路径、形状、类型、属性以及数组偏移；64 位整数通过二进制保存，避免 JavaScript Number 精度丢失。对象和属性按固定顺序遍历，不写入当前时间；文件名包含内容 SHA-256 前缀，刷新后重选相同文件可重建同一包并续传。
-
-服务端校验包版本、允许路径、数组类型/长度/偏移和点位一致性，然后生成小型 `.sbd` HDF5 输入，复用已有配准代码；成功后移除传输包和上传分片。保留的精简输入足以重新处理当前功能，但不包含原始质谱，不能代替原 SBD 做任意 m/z 光谱分析。原始 SBD 留在用户电脑，目录导入和 API 完整 SBD 上传仍兼容。
-
-当前提取上限为 128 MiB；支持标准小端整数、float32/float64 和文本字段，以及 HDF5 内建过滤器。遇到引用/复合类型、外部虚拟数据、超过 32 MiB 的单个 chunk 或未支持的插件过滤器，会明确报错，不回退上传完整 SBD。旧版完整 SBD 上传会话需先在页面取消，再开始新流程。
-
-2026-11-14 的 Chromium 实测：5,809,336,884 字节 SBD 只读取 27,482,183 字节，输出 27,460,560 字节精简包，访问偏移超过 4 GiB；观测到的 WASM 线性内存为 23,199,744 字节（不含 JS 和浏览器内存）。后端还原后，全部解析数组、元数据、板图和矩阵与原文件一致；真实热图完整配准成功，映射 102,908 个点。刷新重选后复用原上传会话，并跳过已上传的精简包首片。尚未完成 Firefox/Safari 及第三方过滤器文件验收。
+完整 SBD 支持保存的平均光谱、精确单点质心谱与多目标离子提取。离子窗口按全局分箱中心选择闭区间，支持 1–32 个目标、合计最多 4,096 个分箱、ppm/Da、sum/max、区域筛选及 `raw / Values[spot_id]`。这些数值与 normalization 因子及 PNG 的 RGB 颜色不同；当前结果以表格和 CSV 提供，尚无原生多离子热图。完整格式与科学解释见 [SBD 质谱读取](sbd-spectra-reader.md)。
 
 ## 浏览器本地无损优化 PNG
 
@@ -71,16 +62,18 @@ SpatialBridge 读取 SBD 的逐点坐标和 normalization 值，建立 `SBD worl
 
 导入项目时会在项目缓存目录生成无损的多级 256×256 图像瓦片金字塔。浏览时后端只读取需要的源瓦片，完成配准后的结果瓦片还会落盘缓存。`--extra tiles` 可安装 pyvips 作为大图处理加速选项，浏览本身不依赖 libvips。
 
-代码和配置只使用相对路径。唯一会出现绝对路径的位置是运行数据：目录导入项目在数据库和 `report.json` 中记录来源文件的原始位置。
+上传数据与项目缓存使用 `data://`、`project://` 相对引用。目录导入及本地完整 SBD 关联记录外部来源路径；这些文件不随数据目录自动迁移。完整 SBD 的关联信息保存在项目下的 `spectra-source.json`。
 
 ## 工作台交互
 
 - 采集前、采集后和前后卷帘三种视图共享同一视野。
 - 画布按 SBD 坐标显示全部映射网格 spot 方框：浅色是理论网格候选，绿色是已被图像响应确认的节点。两者固定在同一套平铺网格上，响应峰偏移只作为诊断。方框尺寸来自 SBD `SpotSizes`（20 × 20 μm），前端用 `coordinate_model` 逐角点评估，避免宽图上的整行偏移、局部扭曲或溢出。
 - 远景按屏幕密度抽样，放大后只绘制视口内的方框，并用批量 canvas 路径降低十万级点位重绘开销。
-- 点击任意方框，侧栏显示对应 SBD spot、raster、OriginalCoordinates、world/显微坐标、检测响应、校准版本和全部 normalization 值。点击优先命中实际 20 μm 足迹。
-- 在采集后视图点击“新增赋值点”，再点击灼烧坑，即可从最近的 SBD 点自动取值，仍可手动改写。人工赋值点以公共坐标（采集前 PNG 像素）保存，原始 SBD 保持只读。
-- “保存视野”单独写入服务端恢复点，切换图层或模式不会改写它；浏览器另用项目级会话保存当前视野和观察设置。
+- 放大后点击方框，侧栏显示对应 SBD spot ID、raster、OriginalCoordinates、world/显微坐标、校准与 normalization 因子详情，并自动读取该点完整质心光谱。光谱支持分页、强度排序与全部峰 CSV；详情标题以 spot ID 标识点位。缩略视图下第一次点击先放大，点位选择优先命中实际足迹。
+- 在采集后视图点击“新增赋值点”，再点击灼烧坑，即可从最近的 SBD 点自动取值，仍可手动改写。人工赋值点以公共坐标（采集前 PNG 像素）保存，原始 SBD 保持只读；赋值来源字段与原始离子强度应分别解释。
+- 浏览器按项目保留当前标签页会话的视野与观察设置，切换图层或模式保持连续浏览。
+- 「光谱数据」面板默认使用项目完整 SBD；仅在源不可用或主动点击「更换数据文件」时显示路径编辑器。平均光谱和多目标离子数值可下载完整 CSV。
+- 历史项目支持删除记录；处理期间可检查图像预览，最终配准质量仍需复核诊断输出。
 - 点击和拖动分开处理：指针移动超过 5 个 CSS 像素后，本次释放不会选择点位或新增赋值点。指针在画布外释放、取消、窗口失焦和多指操作都会结束或抑制当前手势。已有人工点可用 Enter 或空格键编辑。
 
 ## HTTP API
@@ -93,6 +86,12 @@ SpatialBridge 读取 SBD 的逐点坐标和 normalization 值，建立 `SBD worl
 | `GET /api/projects` | 项目列表 |
 | `POST /api/uploads` → `PUT …/chunks/{i}` → `POST …/complete` | 分片上传并创建项目 |
 | `POST /api/projects` | 从服务器本地目录导入项目 |
+| `DELETE /api/projects/{id}` | 删除项目记录 |
+| `GET /api/projects/{id}/spectra` | 完整 SBD 可用状态和光谱目录 |
+| `POST /api/projects/{id}/spectra/source` | 校验并关联完整 SBD |
+| `GET /api/projects/{id}/spectra/mean?id=…` | 已保存的平均光谱 |
+| `GET /api/projects/{id}/spectra/spots/{spot_id}` | 精确单点质心光谱 |
+| `POST /api/projects/{id}/spectra/ions` | 全局分箱多目标离子强度；参数见 [SBD 文档](sbd-spectra-reader.md#接口) |
 | `GET /api/projects/{id}/report` | 处理报告 |
 | `GET /api/projects/{id}/spots` | 分页/抽样点 |
 | `GET /api/projects/{id}/spots/overlay` | 画布所需的全部点、四类坐标及确认状态 |
