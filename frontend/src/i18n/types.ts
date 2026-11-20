@@ -6,8 +6,6 @@ export interface Translations {
     cancel: string;
     retry: string;
     reprocess: string;
-    save: string;
-    saved: string;
     backHome: string;
     remove: string;
     selectFile: string;
@@ -173,8 +171,6 @@ export interface Translations {
     exportCsvBtn: string;
     exportCsvTooltip: string;
     exportCsvNoDataTooltip: string;
-    saveViewBtn: string;
-    savedBtn: string;
     viewReportAction: string;
     exportCsvAction: string;
     sidebarTitle: string;
@@ -226,7 +222,6 @@ export interface Translations {
     fit: string;
     focusSpot: string;
     locateArea: string;
-    restoreView: string;
     legendDetected: string;
     legendGrid: string;
     scaleUnavailable: string;
@@ -239,9 +234,6 @@ export interface Translations {
     spotDetails: string;
     closeSpotDetails: string;
     loadingSbdData: string;
-    spotDetected: string;
-    spotCandidate: string;
-    currentNormField: string;
     heatmapColorSample: string;
     noColorSample: string;
     normValues: string;
@@ -284,10 +276,7 @@ export interface Translations {
     failedLoadHeatmap: (err: string) => string;
     failedRegHeatmap: (err: string) => string;
     failedReadSpot: (err: string) => string;
-    failedSave: (err: string) => string;
     selectPngOnly: string;
-    restoredSession: string;
-    restoredOverview: string;
     singleLayerAria: string;
     compareLayerAria: (left: string, right: string) => string;
     lensLayerAria: (outer: string, inner: string) => string;
