@@ -2,7 +2,7 @@ name: spatialbridge
 
 services:
   spatialbridge:
-    image: spatialbridge:local
+    image: "${SPATIALBRIDGE_IMAGE:-ghcr.io/smartisannaive/spatialbridge:latest}"
     container_name: spatialbridge
     build:
       context: .

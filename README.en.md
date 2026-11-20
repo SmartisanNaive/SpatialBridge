@@ -98,10 +98,13 @@ The database, upload chunks, reports and caches live under `--data-dir`. Directo
 ```bash
 cp .env.example .env
 sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
-sudo docker compose up -d --build
+sudo docker compose pull
+sudo docker compose up -d --no-build
 ```
 
-See the [deployment guide](docs/deployment.md) (Chinese) for configuration, full-SBD storage planning, updates and backup/restore.
+After frontend and backend tests pass on updates to `main`, GitHub Actions builds and publishes `ghcr.io/smartisannaive/spatialbridge:latest` for Linux amd64/arm64. Each publication also has a `sha-<full commit SHA>` tag; set `SPATIALBRIDGE_IMAGE` in `.env` to pin a version. The container is named `spatialbridge` and serves port 8000. After the first publication, confirm that the package is Public in GitHub Packages to allow anonymous pulls.
+
+See the [deployment guide](docs/deployment.md) (Chinese) for configuration, local source builds, full-SBD storage planning, updates and backup/restore.
 
 ## Documentation
 

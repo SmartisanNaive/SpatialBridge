@@ -99,7 +99,11 @@ uv run spatialbridge register --source-dir ./参考数据 --output-dir ./workspa
 
 ## 3. 容器部署指南
 
-SpatialBridge 提供了基于 [Dockerfile.api](../Dockerfile.api) 的前后端一体化多阶段构建镜像（前端编译产物直接注入 FastAPI 静态分发层）。Compose 项目名和容器名统一为 `spatialbridge`，完整应用镜像统一为 `spatialbridge:local`，与下面的 Apple Container 命令保持一致。容器镜像名称使用小写；产品名称仍为 SpatialBridge。
+SpatialBridge 提供基于 [Dockerfile.api](../Dockerfile.api) 的前后端一体化镜像。Compose 项目名和容器名均为 `spatialbridge`；默认拉取 GitHub Actions 发布的 `ghcr.io/smartisannaive/spatialbridge:latest`，无需在服务器安装 Bun 或编译源码。本地源码构建使用 `spatialbridge:local`。镜像名称使用小写；产品名称仍为 SpatialBridge。
+
+[CI 工作流](../.github/workflows/ci.yml) 在 `main` 更新后先运行前后端测试，再构建 Linux amd64/arm64 镜像并发布到 GHCR；拉取请求只构建 amd64 镜像验证，不发布。也可在 GitHub Actions 的 CI 页面选择 `main` 手动运行。发布使用仓库自带的 `GITHUB_TOKEN`，无需额外配置 Docker Hub 密钥。
+
+镜像标签包括随主分支更新的 `latest` 和对应源码的 `sha-<完整提交 SHA>`。首次发布后，在 GitHub Packages 中确认包的可见性为 **Public**，才能匿名拉取；私有包需要先以具备 `read:packages` 权限的账号凭据登录 GHCR。
 
 ### 3.1 方案一：Linux 服务器生产部署（Docker Compose）
 
@@ -115,6 +119,9 @@ sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
 #### 2. 检查 `.env` 配置
 编辑 `.env` 文件，确认或修改以下关键配置：
 ```bash
+# GitHub Actions 发布的镜像；也可改为已发布的 sha-<完整提交 SHA> 标签以固定版本
+SPATIALBRIDGE_IMAGE=ghcr.io/smartisannaive/spatialbridge:latest
+
 # 发布绑定的宿主机网卡（0.0.0.0 表示所有网卡，127.0.0.1 表示仅允许本机或反向代理访问）
 SPATIALBRIDGE_BIND_ADDRESS=0.0.0.0
 
@@ -127,8 +134,9 @@ SPATIALBRIDGE_DATA_DIR=/srv/spatialbridge/data
 
 #### 3. 启动容器
 ```bash
-# 构建并后台启动服务
-sudo docker compose up -d --build
+# 拉取 Actions 发布的完整应用镜像并后台启动
+sudo docker compose pull
+sudo docker compose up -d --no-build
 
 # 查看运行状态与日志
 sudo docker compose ps
@@ -136,6 +144,16 @@ sudo docker compose logs -f spatialbridge
 ```
 
 浏览器访问 `http://<服务器IP>:8000` 即可开始使用。
+
+#### 4. 可选：从源码构建
+
+需要验证未发布的本地代码时，将 `.env` 中的 `SPATIALBRIDGE_IMAGE` 改为 `spatialbridge:local`，再运行：
+
+```bash
+sudo docker compose up -d --build --pull never
+```
+
+这样不会将本地构建结果误标为 GHCR 发布版本；更新源码后也使用此命令重新构建。切回发布镜像时，恢复 `.env` 中的 GHCR 地址，再执行 `docker compose pull` 和 `docker compose up -d --no-build`。
 
 ---
 
@@ -240,8 +258,9 @@ server {
 # 1. 拉取最新代码
 git pull origin main
 
-# 2. 重新构建镜像并平滑更新容器
-sudo docker compose up -d --build
+# 2. 确认目标提交的 CI 已发布镜像，再拉取并更新容器
+sudo docker compose pull
+sudo docker compose up -d --no-build
 
 # 3. 验证服务状态
 curl -fsS http://127.0.0.1:8000/api/health

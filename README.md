@@ -98,10 +98,13 @@ bun run --cwd frontend build
 ```bash
 cp .env.example .env
 sudo install -d -o 10001 -g 10001 -m 0770 /srv/spatialbridge/data
-sudo docker compose up -d --build
+sudo docker compose pull
+sudo docker compose up -d --no-build
 ```
 
-配置项、完整 SBD 容量规划、更新和备份恢复见[部署文档](docs/deployment.md)。
+GitHub Actions 在 `main` 更新且前后端测试通过后，自动构建并发布 `ghcr.io/smartisannaive/spatialbridge:latest`，支持 Linux amd64/arm64。每次发布也有 `sha-<完整提交 SHA>` 标签，可通过 `.env` 的 `SPATIALBRIDGE_IMAGE` 固定版本。容器名为 `spatialbridge`，服务端口仍为 8000。首次发布后需在 GitHub Packages 确认包为 Public，匿名拉取才可用。
+
+配置项、本地源码构建、完整 SBD 容量规划、更新和备份恢复见[部署文档](docs/deployment.md)。
 
 ## 文档
 
